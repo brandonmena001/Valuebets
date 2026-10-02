@@ -10,6 +10,12 @@ servers:
 tags:
   - name: health
     description: Health operations
+  - name: dashboard
+    description: Dashboard aggregates and value bets
+  - name: matches
+    description: Fixtures, match statistics, and bookmaker markets
+  - name: sources
+    description: Automated data collection health and sync status
 paths:
   /healthz:
     get:
@@ -24,6 +30,163 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /dashboard:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary
+      responses:
+        "200":
+          description: Current dashboard summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+  /value-bets:
+    get:
+      operationId: getValueBets
+      tags: [dashboard]
+      summary: List model-validated value bets
+      parameters:
+        - name: league
+          in: query
+          schema:
+            $ref: "#/components/schemas/LeagueCode"
+        - name: marketCategory
+          in: query
+          schema:
+            $ref: "#/components/schemas/MarketCategory"
+        - name: minEv
+          in: query
+          schema:
+            type: number
+            minimum: 0
+            maximum: 100
+            default: 5
+      responses:
+        "200":
+          description: Opportunities with fresh odds and sufficient model data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ValueBet"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /matches:
+    get:
+      operationId: getMatches
+      tags: [matches]
+      summary: List tracked fixtures and available market coverage
+      parameters:
+        - name: league
+          in: query
+          schema:
+            $ref: "#/components/schemas/LeagueCode"
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [scheduled, live, finished]
+        - name: days
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 30
+            default: 7
+      responses:
+        "200":
+          description: Tracked matches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MatchSummary"
+        "400":
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /matches/{fixtureId}:
+    get:
+      operationId: getMatchDetail
+      tags: [matches]
+      summary: Get fixture statistics and bookmaker odds
+      parameters:
+        - name: fixtureId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Match with collected statistics and odds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MatchDetail"
+        "400":
+          description: Invalid fixture identifier
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Fixture not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /sources:
+    get:
+      operationId: getSourceStatus
+      tags: [sources]
+      summary: Get provider status, quota use, and next collection time
+      responses:
+        "200":
+          description: Data source status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceStatus"
+  /sync:
+    post:
+      operationId: requestDataSync
+      tags: [sources]
+      summary: Request an immediate quota-aware data sync
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SyncRequestInput"
+      responses:
+        "202":
+          description: Sync accepted or already in progress
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SyncRequestResult"
+        "400":
+          description: Invalid sync request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: Sync temporarily rate limited
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 components:
   schemas:
     HealthStatus:
@@ -33,4 +196,297 @@ components:
           type: string
       required:
         - status
+    LeagueCode:
+      type: string
+      enum: [premier-league, la-liga, bundesliga]
+    MarketCategory:
+      type: string
+      enum: [match-result, goals, corners, cards, shots-on-target]
+    Provider:
+      type: string
+      enum: [api-football, oddspapi]
+    SourceState:
+      type: string
+      enum: [unconfigured, waiting, ok, partial, stale, error]
+    MatchStatus:
+      type: string
+      enum: [scheduled, live, finished, postponed, cancelled, unknown]
+    MatchStats:
+      type: object
+      properties:
+        homeCorners:
+          type: ["integer", "null"]
+        awayCorners:
+          type: ["integer", "null"]
+        homeYellowCards:
+          type: ["integer", "null"]
+        awayYellowCards:
+          type: ["integer", "null"]
+        homeRedCards:
+          type: ["integer", "null"]
+        awayRedCards:
+          type: ["integer", "null"]
+        homeShotsOnTarget:
+          type: ["integer", "null"]
+        awayShotsOnTarget:
+          type: ["integer", "null"]
+      required:
+        - homeCorners
+        - awayCorners
+        - homeYellowCards
+        - awayYellowCards
+        - homeRedCards
+        - awayRedCards
+        - homeShotsOnTarget
+        - awayShotsOnTarget
+    MatchSummary:
+      type: object
+      properties:
+        fixtureId:
+          type: string
+        league:
+          $ref: "#/components/schemas/LeagueCode"
+        country:
+          type: string
+        homeTeam:
+          type: string
+        awayTeam:
+          type: string
+        kickoff:
+          type: string
+          format: date-time
+        status:
+          $ref: "#/components/schemas/MatchStatus"
+        homeScore:
+          type: ["integer", "null"]
+        awayScore:
+          type: ["integer", "null"]
+        stats:
+          $ref: "#/components/schemas/MatchStats"
+        availableMarkets:
+          type: array
+          items:
+            $ref: "#/components/schemas/MarketCategory"
+        lastUpdatedAt:
+          type: ["string", "null"]
+          format: date-time
+      required:
+        - fixtureId
+        - league
+        - country
+        - homeTeam
+        - awayTeam
+        - kickoff
+        - status
+        - homeScore
+        - awayScore
+        - stats
+        - availableMarkets
+        - lastUpdatedAt
+    OddsQuote:
+      type: object
+      properties:
+        id:
+          type: string
+        category:
+          $ref: "#/components/schemas/MarketCategory"
+        marketName:
+          type: string
+        selection:
+          type: string
+        playerName:
+          type: ["string", "null"]
+        line:
+          type: ["number", "null"]
+        bookmaker:
+          type: string
+        decimalOdds:
+          type: number
+          exclusiveMinimum: 1
+        source:
+          $ref: "#/components/schemas/Provider"
+        sourceUpdatedAt:
+          type: ["string", "null"]
+          format: date-time
+        capturedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - category
+        - marketName
+        - selection
+        - playerName
+        - line
+        - bookmaker
+        - decimalOdds
+        - source
+        - sourceUpdatedAt
+        - capturedAt
+    ValueBet:
+      allOf:
+        - $ref: "#/components/schemas/OddsQuote"
+        - type: object
+          properties:
+            fixtureId:
+              type: string
+            league:
+              $ref: "#/components/schemas/LeagueCode"
+            homeTeam:
+              type: string
+            awayTeam:
+              type: string
+            kickoff:
+              type: string
+              format: date-time
+            modelProbability:
+              type: number
+              minimum: 0
+              maximum: 1
+            fairOdds:
+              type: number
+              exclusiveMinimum: 1
+            expectedValuePct:
+              type: number
+            modelVersion:
+              type: string
+            sampleSize:
+              type: integer
+              minimum: 0
+            confidence:
+              type: string
+              enum: [low, medium, high]
+          required:
+            - fixtureId
+            - league
+            - homeTeam
+            - awayTeam
+            - kickoff
+            - modelProbability
+            - fairOdds
+            - expectedValuePct
+            - modelVersion
+            - sampleSize
+            - confidence
+    MatchDetail:
+      type: object
+      properties:
+        match:
+          $ref: "#/components/schemas/MatchSummary"
+        odds:
+          type: array
+          items:
+            $ref: "#/components/schemas/OddsQuote"
+      required: [match, odds]
+    SourceHealth:
+      type: object
+      properties:
+        provider:
+          $ref: "#/components/schemas/Provider"
+        state:
+          $ref: "#/components/schemas/SourceState"
+        lastAttemptAt:
+          type: ["string", "null"]
+          format: date-time
+        lastSuccessAt:
+          type: ["string", "null"]
+          format: date-time
+        recordsCollected:
+          type: integer
+          minimum: 0
+        requestsRemaining:
+          type: ["integer", "null"]
+        requestLimit:
+          type: ["integer", "null"]
+        message:
+          type: ["string", "null"]
+      required:
+        - provider
+        - state
+        - lastAttemptAt
+        - lastSuccessAt
+        - recordsCollected
+        - requestsRemaining
+        - requestLimit
+        - message
+    DashboardSummary:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        upcomingMatches:
+          type: integer
+        liveMatches:
+          type: integer
+        valueBetsCount:
+          type: integer
+        averageEvPct:
+          type: ["number", "null"]
+        latestOddsSync:
+          type: ["string", "null"]
+          format: date-time
+        latestStatsSync:
+          type: ["string", "null"]
+          format: date-time
+        dataState:
+          $ref: "#/components/schemas/SourceState"
+        topValueBets:
+          type: array
+          items:
+            $ref: "#/components/schemas/ValueBet"
+      required:
+        - generatedAt
+        - upcomingMatches
+        - liveMatches
+        - valueBetsCount
+        - averageEvPct
+        - latestOddsSync
+        - latestStatsSync
+        - dataState
+        - topValueBets
+    SourceStatus:
+      type: object
+      properties:
+        sources:
+          type: array
+          items:
+            $ref: "#/components/schemas/SourceHealth"
+        nextScheduledSyncAt:
+          type: ["string", "null"]
+          format: date-time
+        scheduleDescription:
+          type: string
+      required: [sources, nextScheduledSyncAt, scheduleDescription]
+    SyncRequestInput:
+      type: object
+      properties:
+        scope:
+          type: string
+          enum: [all, fixtures, odds, stats]
+          default: all
+        providers:
+          type: array
+          items:
+            $ref: "#/components/schemas/Provider"
+          uniqueItems: true
+          maxItems: 2
+      required: [scope]
+    SyncRequestResult:
+      type: object
+      properties:
+        accepted:
+          type: boolean
+        queuedAt:
+          type: string
+          format: date-time
+        message:
+          type: string
+      required: [accepted, queuedAt, message]
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
 

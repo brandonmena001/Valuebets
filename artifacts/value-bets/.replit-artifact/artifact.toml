@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Value Bets de fútbol"
+description = "Dashboard de análisis de fútbol con recolección automática de partidos, resultados, estadísticas y cuotas para Premier League, LaLiga y Bundesliga. Calcula probabilidades y EV para 1X2, goles, corners, tarjetas y tiros a puerta por jugador cuando las fuentes los publican; muestra siempre fuente y hora de captura."
+version = "1.0.0"
+id = "artifacts/value-bets"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 23336
+
+[services.development]
+run = "pnpm --filter @workspace/value-bets run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/value-bets", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/value-bets/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "23336"
+BASE_PATH = "/"
