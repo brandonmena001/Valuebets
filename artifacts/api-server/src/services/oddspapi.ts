@@ -34,6 +34,21 @@ export type OddsPapiQuota = {
   requestLimit: number | null;
 };
 
+export type OddsPapiBookmaker = {
+  slug: string;
+  name: string;
+};
+
+export type OddsPapiMarket = {
+  id: string;
+  name: string;
+  playerProp: boolean;
+  handicap: number | null;
+  outcomeNames: Record<string, string>;
+};
+
+let lastRequestStartedAt = 0;
+
 function apiKey(): string {
   const key = process.env.ODDSPAPI_API_KEY;
   if (!key) throw new ProviderError("OddsPapi no está configurado.");
@@ -44,6 +59,11 @@ async function oddsPapiGet(
   path: string,
   params: Record<string, string>,
 ): Promise<{ body: unknown; quota: OddsPapiQuota }> {
+  const waitMs = Math.max(0, 1_000 - (Date.now() - lastRequestStartedAt));
+  if (waitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+  lastRequestStartedAt = Date.now();
   const query = new URLSearchParams({ ...params, apiKey: apiKey() });
   const response = await fetch(`https://api.oddspapi.io${path}?${query}`, {
     signal: AbortSignal.timeout(25_000),
@@ -104,7 +124,9 @@ function leagueForName(name: string): LeagueCode | null {
     !/women|u\d|under|2nd|reserve|academy/.test(normalized)
   ) return "premier-league";
   if (
-    (normalized.includes("la liga") || normalized.includes("primera division")) &&
+    (normalized.includes("la liga") ||
+      normalized.includes("laliga") ||
+      normalized.includes("primera division")) &&
     !/women|u\d|under|2|reserve/.test(normalized)
   ) return "la-liga";
   if (
@@ -147,6 +169,80 @@ export async function fetchFootballTournaments(): Promise<{
   return { tournaments, quota };
 }
 
+export async function fetchFootballBookmakers(): Promise<{
+  bookmakers: OddsPapiBookmaker[];
+  quota: OddsPapiQuota;
+}> {
+  const { body, quota } = await oddsPapiGet("/v4/bookmakers", {});
+  if (!Array.isArray(body)) {
+    throw new ProviderError("OddsPapi devolvió un catálogo de casas con formato desconocido.");
+  }
+  const bookmakers = body.flatMap((item) => {
+    const object = record(item);
+    const slug = findText(object ?? {}, ["slug"]);
+    const name = findText(object ?? {}, ["bookmakerName", "name"]);
+    return slug && name ? [{ slug, name }] : [];
+  });
+  return { bookmakers, quota };
+}
+
+export async function fetchFootballParticipants(): Promise<{
+  participants: Record<string, string>;
+  quota: OddsPapiQuota;
+}> {
+  const { body, quota } = await oddsPapiGet("/v4/participants", {
+    sportId: "10",
+    language: "en",
+  });
+  const object = record(body);
+  if (!object) {
+    throw new ProviderError("OddsPapi devolvió un catálogo de equipos con formato desconocido.");
+  }
+  const participants = Object.fromEntries(
+    Object.entries(object).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+  return { participants, quota };
+}
+
+export async function fetchFootballMarkets(): Promise<{
+  markets: OddsPapiMarket[];
+  quota: OddsPapiQuota;
+}> {
+  const { body, quota } = await oddsPapiGet("/v4/markets", {
+    language: "en",
+  });
+  if (!Array.isArray(body)) {
+    throw new ProviderError("OddsPapi devolvió un catálogo de mercados con formato desconocido.");
+  }
+  const markets = body.flatMap((item) => {
+    const object = record(item);
+    if (!object) return [];
+    const id = findText(object, ["marketId"]);
+    const name = findText(object, ["marketName"]);
+    if (!id || !name) return [];
+    const outcomes = Array.isArray(object.outcomes) ? object.outcomes : [];
+    const outcomeNames = Object.fromEntries(
+      outcomes.flatMap((item) => {
+        const outcome = record(item);
+        if (!outcome) return [];
+        const outcomeId = findText(outcome, ["outcomeId"]);
+        const outcomeName = findText(outcome, ["outcomeName"]);
+        return outcomeId && outcomeName ? [[outcomeId, outcomeName]] : [];
+      }),
+    );
+    return [{
+      id,
+      name,
+      playerProp: object.playerProp === true,
+      handicap: findNumber(object, ["handicap"]),
+      outcomeNames,
+    }];
+  });
+  return { markets, quota };
+}
+
 function normalizeName(value: string): string {
   return value
     .toLowerCase()
@@ -162,16 +258,27 @@ function teamName(value: unknown): string | null {
   return object ? findText(object, ["name", "fullName", "teamName", "label"]) : null;
 }
 
-function eventDetails(object: Record<string, unknown>): {
+function eventDetails(
+  object: Record<string, unknown>,
+  participants: Record<string, string>,
+): {
   home: string;
   away: string;
   kickoff: Date;
   id: string | null;
 } | null {
-  const home = teamName(object.homeTeam) ?? teamName(object.home) ??
-    findText(object, ["homeTeamName", "homeName", "home"]);
-  const away = teamName(object.awayTeam) ?? teamName(object.away) ??
-    findText(object, ["awayTeamName", "awayName", "away"]);
+  const homeId = findText(object, ["participant1Id"]);
+  const awayId = findText(object, ["participant2Id"]);
+  const home =
+    teamName(object.homeTeam) ??
+    teamName(object.home) ??
+    findText(object, ["participant1Name", "homeTeamName", "homeName"]) ??
+    (homeId ? participants[homeId] : null);
+  const away =
+    teamName(object.awayTeam) ??
+    teamName(object.away) ??
+    findText(object, ["participant2Name", "awayTeamName", "awayName"]) ??
+    (awayId ? participants[awayId] : null);
   const rawDate = findText(object, [
     "startTime",
     "start_time",

@@ -126,9 +126,25 @@ export async function apiFootballGet<T>(
 
   const body = (await response.json()) as ApiResponse<T>;
   if (body.errors && Object.keys(body.errors as object).length > 0) {
-    const fields = Object.keys(body.errors as object).slice(0, 5).join(", ");
+    const errors =
+      typeof body.errors === "object" && body.errors != null
+        ? (body.errors as Record<string, unknown>)
+        : {};
+    const planError = errors.plan;
+    const fields = Object.keys(errors).slice(0, 5).join(", ");
+    let safePlanMessage =
+      typeof planError === "string" ? planError : "";
+    const secret = process.env.API_FOOTBALL_KEY;
+    if (secret) safePlanMessage = safePlanMessage.split(secret).join("[credencial]");
+    safePlanMessage = safePlanMessage
+      .replace(/([?&](?:apiKey|token)=)[^&\s]+/gi, "$1[redactado]")
+      .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[correo]")
+      .replace(/\s+/g, " ")
+      .slice(0, 240);
     throw new ProviderError(
-      fields
+      safePlanMessage
+        ? `API-Football: ${safePlanMessage}`
+        : fields
         ? `API-Football devolvió errores en los campos: ${fields}.`
         : "API-Football devolvió un error en la respuesta.",
     );
