@@ -23,7 +23,12 @@ import {
 } from "./api-football";
 import {
   fetchFootballTournaments,
+  fetchFootballBookmakers,
+  fetchFootballMarkets,
+  fetchFootballParticipants,
   fetchTournamentOdds,
+  type OddsPapiBookmaker,
+  type OddsPapiMarket,
   type NormalizedOddsEvent,
   type OddsPapiQuota,
   type TournamentRef,
@@ -44,6 +49,7 @@ const ODDSPAPI_LOCAL_MONTHLY_CAP = 200;
 const FIXTURE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const ODDS_INTERVAL_MS = 8 * 60 * 60 * 1000;
 const MANUAL_COOLDOWN_MS = 5 * 60 * 1000;
+const ODDSPAPI_REFERENCE_CACHE_MS = 7 * 24 * 60 * 60 * 1000;
 
 let activeRun: Promise<void> | null = null;
 let schedulerStarted = false;
@@ -52,6 +58,14 @@ let lastStatsRunAt = 0;
 let lastOddsRunAt = 0;
 let lastManualRunAt = 0;
 let nextScheduledAt = new Date(Date.now() + 15_000);
+let oddsReferenceCache:
+  | {
+      loadedAt: number;
+      bookmakers: OddsPapiBookmaker[];
+      participants: Record<string, string>;
+      markets: OddsPapiMarket[];
+    }
+  | null = null;
 
 const providerKeys: Record<ProviderName, string | undefined> = {
   "api-football": process.env.API_FOOTBALL_KEY,
@@ -169,6 +183,9 @@ function shortError(error: unknown, provider?: ProviderName): string {
     }
     if (error.statusCode === 429) {
       return `${provider === "oddspapi" ? "OddsPapi" : "API-Football"} informó que se alcanzó la cuota (HTTP 429).`;
+    }
+    if (error.statusCode === 400) {
+      return error.message;
     }
     return `${provider === "oddspapi" ? "OddsPapi" : "API-Football"} respondió HTTP ${error.statusCode}.`;
   }
@@ -290,7 +307,7 @@ async function saveOddsMatch(event: NormalizedOddsEvent): Promise<number> {
     homeTeam: event.homeTeam,
     awayTeam: event.awayTeam,
     kickoff: event.kickoff,
-    status: "scheduled",
+    status: event.status,
     updatedAt: new Date(),
   };
 
@@ -488,6 +505,7 @@ function quoteFingerprint(
         quote.bookmaker,
         quote.marketName,
         quote.selection,
+        quote.playerName ?? "",
         quote.line ?? "",
         quote.decimalOdds,
         quote.sourceUpdatedAt?.toISOString() ?? "",
@@ -525,6 +543,30 @@ async function persistOddsEvent(event: NormalizedOddsEvent): Promise<number> {
   return event.quotes.length;
 }
 
+async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReferenceCache>> {
+  if (
+    oddsReferenceCache &&
+    Date.now() - oddsReferenceCache.loadedAt < ODDSPAPI_REFERENCE_CACHE_MS
+  ) return oddsReferenceCache;
+
+  const bookmakerResult = await callOddsPapi(fetchFootballBookmakers);
+  const participantResult = await callOddsPapi(fetchFootballParticipants);
+  const marketResult = await callOddsPapi(fetchFootballMarkets);
+  const bookmakers = (bookmakerResult as Awaited<ReturnType<typeof fetchFootballBookmakers>>).bookmakers;
+  const participants = (participantResult as Awaited<ReturnType<typeof fetchFootballParticipants>>).participants;
+  const markets = (marketResult as Awaited<ReturnType<typeof fetchFootballMarkets>>).markets;
+  if (!bookmakers.length || !markets.length) {
+    throw new Error("OddsPapi devolvió catálogos vacíos de casas o mercados.");
+  }
+  oddsReferenceCache = {
+    loadedAt: Date.now(),
+    bookmakers,
+    participants,
+    markets,
+  };
+  return oddsReferenceCache;
+}
+
 async function syncOdds(): Promise<TaskResult> {
   const errors: string[] = [];
   let records = 0;
@@ -541,17 +583,103 @@ async function syncOdds(): Promise<TaskResult> {
     errors.push("OddsPapi no informó cobertura para todas las competiciones elegidas.");
   }
 
-  for (const bookmaker of [
-    { key: "betplay", label: "BetPlay" },
-    { key: "betano", label: "Betano" },
-  ]) {
+  let referenceData: NonNullable<typeof oddsReferenceCache>;
+  try {
+    referenceData = await loadOddsReferenceData();
+  } catch (error) {
+    return {
+      records,
+      errors: [...errors, shortError(error, "oddspapi")],
+      succeeded,
+    };
+  }
+
+  const requestedLabels = new Map([
+    ["betplay", "BetPlay"],
+    ["betano", "Betano"],
+  ]);
+  const normalizeBookmaker = (value: string) =>
+    value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const selectedBookmakers = [...requestedLabels.keys()].flatMap((label) => {
+    const bySlug = referenceData.bookmakers.find(
+      (bookmaker) => normalizeBookmaker(bookmaker.slug) === label,
+    );
+    const match =
+      bySlug ??
+      referenceData.bookmakers.find(
+        (bookmaker) => normalizeBookmaker(bookmaker.name) === label,
+      );
+    return match ? [match] : [];
+  });
+  const availableBookmakerLabels = new Set(
+    referenceData.bookmakers.flatMap((bookmaker) => [
+      normalizeBookmaker(bookmaker.slug),
+      normalizeBookmaker(bookmaker.name),
+    ]),
+  );
+  const missingBookmakers = [...requestedLabels.entries()]
+    .filter(([slug]) => !availableBookmakerLabels.has(slug))
+    .map(([, label]) => label);
+  if (missingBookmakers.length) {
+    errors.push(
+      `OddsPapi no tiene disponible ${missingBookmakers.join(" ni ")} para esta cuenta.`,
+    );
+  }
+  if (!selectedBookmakers.length) {
+    return { records, errors, succeeded: true };
+  }
+
+  const eventsByIdentity = new Map<string, NormalizedOddsEvent>();
+  logger.info(
+    {
+      provider: "oddspapi",
+      tournaments: tournaments.map(({ leagueCode, tournamentId }) => ({
+        leagueCode,
+        tournamentId,
+      })),
+      bookmakerSlugs: selectedBookmakers.map((bookmaker) => bookmaker.slug),
+    },
+    "Requesting tournament odds",
+  );
+  for (const bookmaker of selectedBookmakers) {
     try {
       const response = await callOddsPapi(() =>
-        fetchTournamentOdds(tournaments, bookmaker.key, bookmaker.label),
+        fetchTournamentOdds(
+          tournaments,
+          bookmaker,
+          referenceData.participants,
+          referenceData.markets,
+        ),
       );
       succeeded = true;
-      const events = (response as Awaited<ReturnType<typeof fetchTournamentOdds>>).events;
-      for (const event of events) records += await persistOddsEvent(event);
+      const bookmakerEvents =
+        (response as Awaited<ReturnType<typeof fetchTournamentOdds>>).events;
+      logger.info(
+        {
+          provider: "oddspapi",
+          bookmakerSlug: bookmaker.slug,
+          eventCount: bookmakerEvents.length,
+          quoteCount: bookmakerEvents.reduce(
+            (total, event) => total + event.quotes.length,
+            0,
+          ),
+        },
+        "Odds provider response parsed",
+      );
+      for (const event of bookmakerEvents) {
+        const identity = event.oddsPapiFixtureId ?? [
+          event.leagueCode,
+          normalizeTeam(event.homeTeam),
+          normalizeTeam(event.awayTeam),
+          event.kickoff.toISOString(),
+        ].join("|");
+        const existing = eventsByIdentity.get(identity);
+        if (existing) {
+          existing.quotes.push(...event.quotes);
+        } else {
+          eventsByIdentity.set(identity, { ...event, quotes: [...event.quotes] });
+        }
+      }
     } catch (error) {
       errors.push(shortError(error, "oddspapi"));
       const statusCode =
@@ -559,11 +687,34 @@ async function syncOdds(): Promise<TaskResult> {
           ? Number((error as { statusCode?: unknown }).statusCode)
           : undefined;
       logger.warn(
-        { provider: "oddspapi", bookmaker: bookmaker.key, statusCode },
+        { provider: "oddspapi", bookmakerSlug: bookmaker.slug, statusCode },
         "Odds collection failed",
       );
     }
   }
+  const events = [...eventsByIdentity.values()];
+  const quoteCount = events.reduce((total, event) => total + event.quotes.length, 0);
+  logger.info(
+    {
+      provider: "oddspapi",
+      tournamentCount: tournaments.length,
+      eventCount: events.length,
+      quoteCount,
+      shotOnTargetQuotes: events.reduce(
+        (total, event) =>
+          total +
+          event.quotes.filter((quote) => quote.marketCategory === "shots-on-target").length,
+        0,
+      ),
+    },
+    "Odds collection merged",
+  );
+  if (succeeded && !events.length && !errors.length) {
+    errors.push("OddsPapi no devolvió partidos para los torneos seleccionados.");
+  } else if (succeeded && events.length && !quoteCount) {
+    errors.push("OddsPapi devolvió partidos sin cuotas de los mercados reconocidos.");
+  }
+  for (const event of events) records += await persistOddsEvent(event);
   return { records, errors, succeeded };
 }
 

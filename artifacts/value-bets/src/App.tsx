@@ -163,7 +163,7 @@ function BetRows({ bets, onSelect }: { bets: ValueBet[]; onSelect: (fixtureId: s
     <thead><tr><th>Encuentro / liga</th><th>Mercado</th><th>Cuota</th><th>Prob. modelo</th><th>Valor esperado</th><th>Confianza</th></tr></thead>
     <tbody>{bets.map(bet => <tr className="bet-row" key={bet.id} onClick={() => onSelect(bet.fixtureId)} data-testid={`row-value-bet-${bet.id}`} style={{ cursor: 'pointer' }}>
       <td><div className="team-pair">{bet.homeTeam} <span style={{ color: 'hsl(var(--muted-foreground))' }}>—</span> {bet.awayTeam}</div><div className="subline">{leagues[bet.league] ?? bet.league} · {formatDate(bet.kickoff, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</div></td>
-      <td><div>{bet.selection}</div><div className="subline">{bet.marketName}{bet.line == null ? '' : ` · ${bet.line}`}</div></td>
+      <td><div>{bet.selection}</div>{bet.playerName && <div className="subline">Jugador · {bet.playerName}</div>}<div className="subline">{bet.marketName}{bet.line == null ? '' : ` · ${bet.line}`}</div></td>
       <td><span className="mono">{formatValue(bet.decimalOdds, 2)}</span><div className="subline">{bet.bookmaker}</div></td>
       <td className="mono">{formatValue(bet.modelProbability * 100, 1)}%</td>
       <td><span className="ev-pill">{bet.expectedValuePct > 0 ? '+' : ''}{formatValue(bet.expectedValuePct, 1)}%</span></td>
@@ -307,7 +307,7 @@ function MatchDetailModal({ fixtureId, onClose }: { fixtureId: string; onClose: 
           </div>
           <div className="section-head" style={{ padding: '0 0 10px', border: 0 }}><div><div className="section-kicker">Cuotas recibidas</div><div className="section-title">Mercados · {data.odds.length}</div></div></div>
           {data.odds.length ? <div className="table-wrap"><table className="bet-table"><thead><tr><th>Mercado / selección</th><th>Casa</th><th>Cuota</th><th>Fuente / captura</th></tr></thead><tbody>{data.odds.map(odd => <tr key={odd.id} data-testid={`row-odds-${odd.id}`}>
-            <td>{odd.marketName}<div className="subline">{odd.selection}{odd.line == null ? '' : ` · ${odd.line}`}</div></td><td>{odd.bookmaker}</td><td className="mono">{formatValue(odd.decimalOdds, 2)}</td><td>{providerNames[odd.source] ?? odd.source}<div className="subline">{formatDate(odd.capturedAt, { hour: '2-digit', minute: '2-digit' })}</div></td>
+            <td>{odd.marketName}<div className="subline">{odd.selection}{odd.line == null ? '' : ` · ${odd.line}`}</div>{odd.playerName && <div className="subline">Jugador · {odd.playerName}</div>}</td><td>{odd.bookmaker}</td><td className="mono">{formatValue(odd.decimalOdds, 2)}</td><td>{providerNames[odd.source] ?? odd.source}<div className="subline">{formatDate(odd.capturedAt, { hour: '2-digit', minute: '2-digit' })}</div></td>
           </tr>)}</tbody></table></div> : <EmptyState title="Sin cuotas recibidas" copy="La respuesta del servidor no incluye cuotas para este encuentro." />}
         </>}
       </div>

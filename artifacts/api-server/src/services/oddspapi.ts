@@ -26,6 +26,7 @@ export type NormalizedOddsEvent = {
   homeTeam: string;
   awayTeam: string;
   kickoff: Date;
+  status: "scheduled" | "live" | "finished" | "cancelled" | "unknown";
   quotes: NormalizedOddsQuote[];
 };
 
@@ -72,10 +73,21 @@ async function oddsPapiGet(
     requestsRemaining: readHeader(response.headers.get("x-ratelimit-remaining")),
     requestLimit: readHeader(response.headers.get("x-ratelimit-limit")),
   };
-  if (!response.ok) {
-    throw new ProviderError(`OddsPapi respondió HTTP ${response.status}.`, response.status);
+  const responseText = await response.text();
+  let body: unknown;
+  try {
+    body = JSON.parse(responseText) as unknown;
+  } catch {
+    body = responseText || null;
   }
-  return { body: await response.json(), quota };
+  if (!response.ok) {
+    const detail = safeProviderErrorDetail(body, apiKey());
+    throw new ProviderError(
+      `OddsPapi respondió HTTP ${response.status}${detail ? `: ${detail}` : "."}`,
+      response.status,
+    );
+  }
+  return { body, quota };
 }
 
 function readHeader(value: string | null): number | null {
@@ -115,6 +127,57 @@ function findNumber(object: Record<string, unknown>, keys: string[]): number | n
     }
   }
   return null;
+}
+
+function safeProviderErrorDetail(body: unknown, secret: string): string {
+  const safeMessageKeys = new Set([
+    "message",
+    "error",
+    "detail",
+    "details",
+    "description",
+    "reason",
+    "errormessage",
+    "error_description",
+    "code",
+  ]);
+  const messages: string[] = [];
+  const collect = (value: unknown, depth = 0): void => {
+    if (depth > 5) return;
+    if (Array.isArray(value)) {
+      for (const item of value.slice(0, 5)) collect(item, depth + 1);
+      return;
+    }
+    const object = record(value);
+    if (!object) return;
+    for (const [key, nested] of Object.entries(object)) {
+      const normalizedKey = key.toLowerCase();
+      if (/(key|token|secret|authorization|credential)/i.test(normalizedKey)) continue;
+      if (safeMessageKeys.has(normalizedKey) && typeof nested === "string") {
+        messages.push(`${key}: ${nested}`);
+      } else if (typeof nested === "object" && nested != null) {
+        collect(nested, depth + 1);
+      }
+    }
+  };
+  collect(body);
+  const object = record(body);
+  const raw =
+    typeof body === "string"
+      ? body
+      : messages.length
+        ? messages.join("; ")
+        : object
+          ? `Respuesta del proveedor con campos: ${Object.keys(object).slice(0, 5).join(", ")}`
+          : "";
+  return raw
+    .split(secret)
+    .join("[credencial]")
+    .replace(/([?&](?:apiKey|token)=)[^&\s]+/gi, "$1[redactado]")
+    .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/gi, "[correo]")
+    .replace(/\b[A-Za-z0-9_-]{32,}\b/g, "[redactado]")
+    .replace(/\s+/g, " ")
+    .slice(0, 180);
 }
 
 function leagueForName(name: string): LeagueCode | null {
@@ -266,6 +329,7 @@ function eventDetails(
   away: string;
   kickoff: Date;
   id: string | null;
+  status: NormalizedOddsEvent["status"];
 } | null {
   const homeId = findText(object, ["participant1Id"]);
   const awayId = findText(object, ["participant2Id"]);
@@ -291,29 +355,37 @@ function eventDetails(
   const kickoff = new Date(rawDate);
   if (Number.isNaN(kickoff.getTime())) return null;
   const id = findText(object, ["fixtureId", "eventId", "fixture_id", "event_id", "id"]);
-  return { home, away, kickoff, id };
+  const statusId = findNumber(object, ["statusId"]);
+  const statusName = findText(object, ["statusName"])?.toLowerCase() ?? "";
+  const status =
+    statusId === 0 || statusName.includes("pre-game") || statusName.includes("scheduled")
+      ? "scheduled"
+      : statusId === 1 || statusName.includes("live") || statusName.includes("in-play")
+        ? "live"
+        : statusId === 2 || statusName.includes("ended") || statusName.includes("finished")
+          ? "finished"
+          : statusId === 3 || statusName.includes("cancel")
+            ? "cancelled"
+            : "unknown";
+  return { home, away, kickoff, id, status };
 }
 
 function classifyMarket(market: string): NormalizedOddsQuote["marketCategory"] | null {
-  const normalized = market.toLowerCase();
-  if (/shot.*target|shots on target|shots on goal/.test(normalized)) return "shots-on-target";
-  if (/corner/.test(normalized)) return "corners";
-  if (/card|booking/.test(normalized)) return "cards";
-  if (/goal|total over|over\/under|over under/.test(normalized)) return "goals";
-  if (/1x2|match result|match winner|full.?time result|three.?way/.test(normalized)) return "match-result";
+  const normalized = market
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+  if (/shot.*target|shots on target|shots on goal|disparos? a puerta|tiros? a puerta/.test(normalized)) {
+    return "shots-on-target";
+  }
+  if (/corner|esquina/.test(normalized)) return "corners";
+  if (/card|booking|tarjeta/.test(normalized)) return "cards";
+  if (/goal|gol|total over|over\/under|over under/.test(normalized)) return "goals";
+  if (/1x2|match result|match winner|full.?time result|three.?way|resultado.*partido|ganador/.test(normalized)) {
+    return "match-result";
+  }
   return null;
 }
-
-type QuoteContext = {
-  bookmaker: string;
-  upstreamBookmakerId: string | null;
-  marketName: string | null;
-  upstreamMarketId: string | null;
-  selection: string | null;
-  playerName: string | null;
-  line: number | null;
-  sourceUpdatedAt: Date | null;
-};
 
 function parseDate(value: unknown): Date | null {
   if (typeof value !== "string" && typeof value !== "number") return null;
@@ -321,159 +393,156 @@ function parseDate(value: unknown): Date | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
-function extractQuotes(root: unknown, requestedBookmaker: string): NormalizedOddsQuote[] {
+function lineFromSelection(selection: string): number | null {
+  const normalized = selection.replace(",", ".");
+  const threshold = normalized.match(/^\s*(-?\d+(?:\.\d+)?)\s*\+\s*$/);
+  const overUnder = normalized.match(
+    /(?:over|under|more than|less than|above|below)\s*(-?\d+(?:\.\d+)?)/i,
+  );
+  const value = Number(threshold?.[1] ?? overUnder?.[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function extractQuotes(
+  event: Record<string, unknown>,
+  bookmakers: OddsPapiBookmaker[],
+  markets: Map<string, OddsPapiMarket>,
+): NormalizedOddsQuote[] {
   const quotes: NormalizedOddsQuote[] = [];
   const seen = new Set<string>();
+  const bookmakerOdds = record(event.bookmakerOdds);
+  if (!bookmakerOdds) return quotes;
 
-  const visit = (value: unknown, context: QuoteContext, keyPath = ""): void => {
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item, context, keyPath);
-      return;
-    }
-    const object = record(value);
-    if (!object) return;
-
-    const next: QuoteContext = { ...context };
-    const bookObject = record(object.bookmaker) ?? record(object.book);
-    const explicitBook = findText(object, ["bookmakerName", "bookName"]);
-    if (explicitBook) next.bookmaker = explicitBook;
-    if (bookObject) {
-      next.bookmaker = findText(bookObject, ["name", "title", "label"]) ?? next.bookmaker;
-      next.upstreamBookmakerId = findText(bookObject, ["id", "key", "bookmakerId"]) ?? next.upstreamBookmakerId;
-    } else if (/bookmaker|sportsbook|bookmaker/i.test(keyPath)) {
-      next.bookmaker = findText(object, ["name", "title", "label"]) ?? next.bookmaker;
-      next.upstreamBookmakerId = findText(object, ["id", "key", "bookmakerId"]) ?? next.upstreamBookmakerId;
+  const bookmakerBySlug = new Map(
+    bookmakers.map((bookmaker) => [normalizeName(bookmaker.slug), bookmaker]),
+  );
+  for (const [rawSlug, rawBookmaker] of Object.entries(bookmakerOdds)) {
+    const bookmaker = bookmakerBySlug.get(normalizeName(rawSlug));
+    const bookmakerObject = record(rawBookmaker);
+    const marketObjects = record(bookmakerObject?.markets);
+    if (!bookmaker || !bookmakerObject || !marketObjects || bookmakerObject.suspended === true) {
+      continue;
     }
 
-    const possibleMarket = findText(object, ["marketName", "market", "market_name"]);
-    if (possibleMarket && classifyMarket(possibleMarket)) next.marketName = possibleMarket;
-    if (!next.marketName) {
-      const name = findText(object, ["name", "title"]);
-      if (name && classifyMarket(name)) {
-        next.marketName = name;
-        next.upstreamMarketId = findText(object, ["marketId", "market_id", "id"]);
+    for (const [marketId, rawMarket] of Object.entries(marketObjects)) {
+      const market = markets.get(marketId);
+      const marketObject = record(rawMarket);
+      const category = market ? classifyMarket(market.name) : null;
+      const outcomes = record(marketObject?.outcomes);
+      if (
+        !market ||
+        !category ||
+        !marketObject ||
+        !outcomes ||
+        marketObject.marketActive === false
+      ) continue;
+
+      for (const [outcomeId, rawOutcome] of Object.entries(outcomes)) {
+        const outcome = record(rawOutcome);
+        if (!outcome) continue;
+        const selection = market.outcomeNames[outcomeId];
+        if (!selection) continue;
+        const players = record(outcome.players);
+        const pricingRows = players
+          ? Object.values(players)
+          : [outcome];
+        for (const rawPricing of pricingRows) {
+          const pricing = record(rawPricing);
+          if (!pricing || pricing.active === false) continue;
+          const decimalOdds = findNumber(pricing, ["price"]);
+          if (decimalOdds == null || decimalOdds <= 1) continue;
+          const playerName = findText(pricing, ["playerName"]);
+          if (market.playerProp && !playerName) continue;
+          const marketLine =
+            findNumber(marketObject, ["handicap", "line", "total"]) ??
+            market.handicap;
+          const line =
+            marketLine != null && Math.abs(marketLine) > 0.0001
+              ? marketLine
+              : lineFromSelection(selection);
+          const quote: NormalizedOddsQuote = {
+            marketCategory: category,
+            marketName: market.name,
+            selection,
+            playerName,
+            line,
+            bookmaker: bookmaker.name,
+            upstreamBookmakerId: bookmaker.slug,
+            upstreamMarketId: market.id,
+            decimalOdds,
+            sourceUpdatedAt:
+              parseDate(pricing.changedAt ?? pricing.bookmakerChangedAt) ??
+              parseDate(event.updatedAt),
+          };
+          const fingerprint = [
+            quote.bookmaker,
+            quote.marketName,
+            quote.selection,
+            quote.playerName ?? "",
+            quote.line ?? "",
+            quote.decimalOdds,
+            quote.sourceUpdatedAt?.toISOString() ?? "",
+          ].join("|");
+          if (seen.has(fingerprint)) continue;
+          seen.add(fingerprint);
+          quotes.push(quote);
+        }
       }
     }
-
-    const selection = findText(object, ["selection", "outcomeName", "outcome", "label", "participantName"]);
-    if (selection && !classifyMarket(selection)) next.selection = selection;
-    const player =
-      findText(object, ["playerName", "player"]) ??
-      (/player/i.test(keyPath) ? findText(object, ["name", "fullName"]) : null);
-    if (player) next.playerName = player;
-    next.line = findNumber(object, ["line", "handicap", "points", "total", "threshold"]) ?? next.line;
-    next.sourceUpdatedAt =
-      parseDate(object.updatedAt ?? object.updated_at ?? object.lastUpdated ?? object.timestamp) ??
-      next.sourceUpdatedAt;
-
-    const price = findNumber(object, ["decimalOdds", "odds", "price", "value"]);
-    const category = next.marketName ? classifyMarket(next.marketName) : null;
-    if (price != null && price > 1 && category && next.selection) {
-      const lineMatch = next.selection.match(
-        /(?:over|under|more than|less than|más de|mas de|menos de)\s*(\d+(?:[.,]\d+)?)/i,
-      );
-      const inferredLine = Number(lineMatch?.[1]?.replace(",", "."));
-      const line =
-        next.line ?? (Number.isFinite(inferredLine) ? inferredLine : null);
-      const quote: NormalizedOddsQuote = {
-        marketCategory: category,
-        marketName: next.marketName!,
-        selection: next.selection,
-        playerName: next.playerName,
-        line: Number.isFinite(line) ? line : null,
-        bookmaker: next.bookmaker,
-        upstreamBookmakerId: next.upstreamBookmakerId,
-        upstreamMarketId: next.upstreamMarketId,
-        decimalOdds: price,
-        sourceUpdatedAt: next.sourceUpdatedAt,
-      };
-      const fingerprint = [
-        quote.bookmaker,
-        quote.marketName,
-        quote.selection,
-        quote.line,
-        quote.decimalOdds,
-        quote.sourceUpdatedAt?.toISOString(),
-      ].join("|");
-      if (!seen.has(fingerprint)) {
-        seen.add(fingerprint);
-        quotes.push(quote);
-      }
-    }
-
-    for (const [key, nested] of Object.entries(object)) {
-      if (nested !== value) visit(nested, next, key);
-    }
-  };
-
-  visit(root, {
-    bookmaker: requestedBookmaker,
-    upstreamBookmakerId: null,
-    marketName: null,
-    upstreamMarketId: null,
-    selection: null,
-    playerName: null,
-    line: null,
-    sourceUpdatedAt: null,
-  });
+  }
   return quotes;
 }
 
 function findEvents(
   root: unknown,
   tournaments: TournamentRef[],
-  requestedBookmaker: string,
+  bookmakers: OddsPapiBookmaker[],
+  participants: Record<string, string>,
+  marketCatalog: OddsPapiMarket[],
 ): NormalizedOddsEvent[] {
   const events: NormalizedOddsEvent[] = [];
   const seen = new Set<string>();
   const tournamentById = new Map(
     tournaments.map((tournament) => [tournament.tournamentId, tournament.leagueCode]),
   );
-  const visit = (
-    value: unknown,
-    inheritedTournamentId: string | null = null,
-    inheritedTournamentName: string | null = null,
-  ): void => {
+  const markets = new Map(marketCatalog.map((market) => [market.id, market]));
+  const visit = (value: unknown): void => {
     if (Array.isArray(value)) {
-      for (const item of value) visit(item, inheritedTournamentId, inheritedTournamentName);
+      for (const item of value) visit(item);
       return;
     }
     const object = record(value);
     if (!object) return;
-    const tournamentId =
-      findText(object, ["tournamentId", "tournament_id", "leagueId"]) ??
-      inheritedTournamentId;
-    const tournamentName =
-      findText(object, ["tournamentName", "leagueName", "competitionName"]) ??
-      inheritedTournamentName;
-    const details = eventDetails(object);
+    const tournamentId = findText(object, ["tournamentId", "tournament_id", "leagueId"]);
+    const tournamentName = findText(object, ["tournamentName", "leagueName", "competitionName"]);
+    const details = eventDetails(object, participants);
     if (details) {
       const leagueCode =
         (tournamentId ? tournamentById.get(tournamentId) : null) ??
         (tournamentName ? leagueForName(tournamentName) : null);
-      if (!leagueCode) return;
-      const identity = details.id ?? [
-        leagueCode,
-        normalizeName(details.home),
-        normalizeName(details.away),
-        details.kickoff.toISOString(),
-      ].join("|");
-      if (!seen.has(identity)) {
-        seen.add(identity);
-        events.push({
-          oddsPapiFixtureId: details.id,
+      if (leagueCode) {
+        const identity = details.id ?? [
           leagueCode,
-          homeTeam: details.home,
-          awayTeam: details.away,
-          kickoff: details.kickoff,
-          quotes: extractQuotes(object, requestedBookmaker),
-        });
+          normalizeName(details.home),
+          normalizeName(details.away),
+          details.kickoff.toISOString(),
+        ].join("|");
+        if (!seen.has(identity)) {
+          seen.add(identity);
+          events.push({
+            oddsPapiFixtureId: details.id,
+            leagueCode,
+            homeTeam: details.home,
+            awayTeam: details.away,
+            kickoff: details.kickoff,
+          status: details.status,
+            quotes: extractQuotes(object, bookmakers, markets),
+          });
+        }
+        return;
       }
-      return;
     }
-    for (const nested of Object.values(object)) {
-      visit(nested, tournamentId, tournamentName);
-    }
+    for (const nested of Object.values(object)) visit(nested);
   };
   visit(root);
   return events;
@@ -481,18 +550,21 @@ function findEvents(
 
 export async function fetchTournamentOdds(
   tournaments: TournamentRef[],
-  bookmakerKey: string,
-  bookmakerLabel: string,
+  bookmaker: OddsPapiBookmaker,
+  participants: Record<string, string>,
+  markets: OddsPapiMarket[],
 ): Promise<{ events: NormalizedOddsEvent[]; quota: OddsPapiQuota }> {
   if (tournaments.length === 0) {
     throw new ProviderError("OddsPapi no tiene torneos configurados.");
   }
   const { body, quota } = await oddsPapiGet("/v4/odds-by-tournaments", {
-    bookmaker: bookmakerKey,
+    bookmaker: bookmaker.slug,
     tournamentIds: tournaments.map((tournament) => tournament.tournamentId).join(","),
+    language: "en",
+    verbosity: "3",
   });
   return {
-    events: findEvents(body, tournaments, bookmakerLabel),
+    events: findEvents(body, tournaments, [bookmaker], participants, markets),
     quota,
   };
 }
