@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, isNull, lte, lt, isNotNull, sql } from "drizzle-orm";
+import { and, desc, eq, gte, inArray, isNull, lte, lt, isNotNull, sql } from "drizzle-orm";
 import {
   db,
+  historicalResultsTable,
   matchesTable,
   matchStatsTable,
   oddsQuotesTable,
@@ -8,7 +9,7 @@ import {
   predictionLogTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
-import { normalizeName } from "../model/names";
+import { normalizeName, resolveName } from "../model/names";
 import type { PredictionOutput } from "../model/predict";
 import { settleOutcome } from "../model/settle";
 
@@ -59,6 +60,9 @@ export async function settlePredictionLog(): Promise<number> {
       kickoff: matchesTable.kickoff,
       homeScore: matchesTable.homeScore,
       awayScore: matchesTable.awayScore,
+      leagueCode: matchesTable.leagueCode,
+      homeTeam: matchesTable.homeTeam,
+      awayTeam: matchesTable.awayTeam,
     })
     .from(predictionLogTable)
     .innerJoin(matchesTable, eq(predictionLogTable.matchId, matchesTable.id))
@@ -73,13 +77,46 @@ export async function settlePredictionLog(): Promise<number> {
     .from(playerMatchStatsTable)
     .where(inArray(playerMatchStatsTable.matchId, matchIds));
 
+  const earliest = Math.min(...pending.map((row) => row.kickoff.getTime())) - 36 * 3_600_000;
+  const imported = await db
+    .select()
+    .from(historicalResultsTable)
+    .where(gte(historicalResultsTable.kickoff, new Date(earliest)));
+  // Partidos creados desde las cuotas no reciben resultado de API-Football (plan gratuito):
+  // se buscan en el historial importado por liga, fecha (±36 h) y nombres de equipo.
+  const findImported = (row: (typeof pending)[number]) =>
+    imported.find(
+      (h) =>
+        h.leagueCode === row.leagueCode &&
+        Math.abs(h.kickoff.getTime() - row.kickoff.getTime()) <= 36 * 3_600_000 &&
+        resolveName(row.homeTeam, [normalizeName(h.homeTeam)]) !== null &&
+        resolveName(row.awayTeam, [normalizeName(h.awayTeam)]) !== null,
+    );
+
   let settled = 0;
   for (const row of pending) {
     const { log } = row;
     let outcome: "win" | "loss" | "void" | null = null;
     if ((row.status === "cancelled" || row.status === "postponed") && row.kickoff < threeDaysAgo) {
       outcome = "void";
-    } else if (row.status === "finished" && row.homeScore != null && row.awayScore != null) {
+    } else if (
+      (row.status === "finished" && row.homeScore != null && row.awayScore != null) ||
+      findImported(row)
+    ) {
+      const fromImport = row.status === "finished" && row.homeScore != null ? undefined : findImported(row);
+      const homeScore = fromImport?.homeScore ?? row.homeScore!;
+      const awayScore = fromImport?.awayScore ?? row.awayScore!;
+      const stats = fromImport
+        ? {
+            homeCorners: fromImport.homeCorners, awayCorners: fromImport.awayCorners,
+            homeYellowCards: fromImport.homeYellowCards, awayYellowCards: fromImport.awayYellowCards,
+            homeRedCards: fromImport.homeRedCards, awayRedCards: fromImport.awayRedCards,
+            homeShotsOnTarget: fromImport.homeShotsOnTarget, awayShotsOnTarget: fromImport.awayShotsOnTarget,
+          }
+        : statsByMatch.get(log.matchId) ?? null;
+      if (fromImport) {
+        await db.update(matchesTable).set({ status: "finished", homeScore, awayScore }).where(eq(matchesTable.id, log.matchId));
+      }
       const target = normalizeName(log.playerName ?? "");
       const lastName = target.split(" ").at(-1);
       const candidates = log.playerName
@@ -100,9 +137,9 @@ export async function settlePredictionLog(): Promise<number> {
         selectionKey: log.selectionKey,
         line: log.line,
         playerName: log.playerName,
-        homeScore: row.homeScore,
-        awayScore: row.awayScore,
-        stats: statsByMatch.get(log.matchId) ?? null,
+        homeScore,
+        awayScore,
+        stats,
         playerShots: player?.shotsOnTarget ?? null,
       });
     }

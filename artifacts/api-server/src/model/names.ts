@@ -19,8 +19,25 @@ const ALIASES: Record<string, string> = {
   gladbach: "monchengladbach", leverkusen: "leverkusen", inter: "internazionale",
 };
 
+// Nombres abreviados de football-data.co.uk que no se resuelven por prefijo de palabras.
+const PHRASES: Array<[RegExp, string]> = [
+  [/\bnott ?m forest\b/, "nottingham forest"],
+  [/\bman utd\b/, "manchester united"],
+  [/\bath madrid\b/, "atletico madrid"],
+  [/\bath bilbao\b/, "athletic club"],
+  [/\bein frankfurt\b/, "eintracht frankfurt"],
+  [/\bm gladbach\b/, "borussia monchengladbach"],
+  [/\bespanol\b/, "espanyol"],
+];
+
+function canonical(value: string): string {
+  let text = normalizeName(value);
+  for (const [pattern, replacement] of PHRASES) text = text.replace(pattern, replacement);
+  return text;
+}
+
 function tokens(value: string): string[] {
-  return normalizeName(value)
+  return canonical(value)
     .split(" ")
     .filter((token) => token && !STOP_TOKENS.has(token))
     .map((token) => ALIASES[token] ?? token);
@@ -49,9 +66,10 @@ export function resolveName(name: string, known: Iterable<string>): string | nul
   const wanted = tokens(name);
   const matches = knownList.filter((candidate) => {
     const other = tokens(candidate);
-    return wanted.length <= other.length
-      ? listMatches(wanted, other)
-      : listMatches(other, wanted);
+    // El nombre más corto debe estar contenido en el más largo; con igual longitud vale cualquier sentido.
+    if (wanted.length < other.length) return listMatches(wanted, other);
+    if (wanted.length > other.length) return listMatches(other, wanted);
+    return listMatches(wanted, other) || listMatches(other, wanted);
   });
   return matches.length === 1 ? matches[0]! : null;
 }

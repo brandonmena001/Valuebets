@@ -5,6 +5,7 @@ import { resolveName } from "./names";
 import { classifyQuote } from "./markets";
 import { buildPredictions, type HistoryMatch, type QuoteInput, type UpcomingMatch } from "./predict";
 import { settleOutcome } from "./settle";
+import { parseCsv, parseFootballDataCsv, seasonCode, currentSeasonStartYear } from "../services/football-data-parse";
 import { expectedRates, fitRateModel, resultProbs, scoreMatrix, totalCountPmf, type Obs } from "./strength";
 
 function rng(seed: number) {
@@ -270,5 +271,53 @@ describe("motor de predicciones (extremo a extremo)", () => {
     // La cuota alta es más vieja que la cuota normal de b3: no debe ganar.
     const out = buildPredictions({ history: L.history, playerGames: [], matches: [m], quotes: [...fresh, ...oldHigh], now: NOW });
     assert.equal(out.length, 0);
+  });
+});
+
+describe("importación de football-data.co.uk", () => {
+  const csv = "\uFEFFDiv,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HS,AS,HST,AST,HF,AF,HC,AC,HY,AY,HR,AR\r\n" +
+    "E0,15/08/2025,20:00,Man United,Arsenal,0,1,A,10,15,2,5,12,10,5,8,2,1,0,0\r\n" +
+    'E0,16/08/25,12:30,"Nott\'m Forest",Brentford,3,1,H,,,,,,,,,,,,\r\n' +
+    "E0,22/08/2025,15:00,Chelsea,Fulham,,,,,,,,,,,,,,,\r\n" +
+    ",,,,,,,,,,,,,,,,,,,\r\n";
+
+  it("lee resultados y estadísticas por nombre de columna, con BOM y CRLF", () => {
+    const rows = parseFootballDataCsv(csv, "premier-league", "2526");
+    assert.equal(rows.length, 2); // el partido sin resultado se ignora
+    const first = rows[0]!;
+    assert.equal(first.homeTeam, "Man United");
+    assert.deepEqual([first.homeScore, first.awayScore, first.homeCorners, first.awayCorners, first.homeShotsOnTarget, first.awayYellowCards], [0, 1, 5, 8, 2, 1]);
+    // 15/08/2025 20:00 hora del Reino Unido (BST) = 19:00 UTC
+    assert.equal(first.kickoff.toISOString(), "2025-08-15T19:00:00.000Z");
+    const second = rows[1]!;
+    assert.equal(second.homeTeam, "Nott'm Forest");
+    assert.equal(second.homeCorners, null); // estadística ausente -> null, no 0
+    assert.equal(second.kickoff.getUTCFullYear(), 2025); // año de 2 dígitos
+  });
+
+  it("devuelve vacío si faltan columnas esenciales y calcula el código de temporada", () => {
+    assert.deepEqual(parseFootballDataCsv("a,b\n1,2", "la-liga", "2526"), []);
+    assert.equal(parseCsv('a,"b,c",d\n1,2,3').length, 2);
+    assert.equal(seasonCode(2026), "2627");
+    assert.equal(currentSeasonStartYear(new Date("2026-10-04T00:00:00Z")), 2026);
+    assert.equal(currentSeasonStartYear(new Date("2027-03-01T00:00:00Z")), 2026);
+  });
+
+  it("empata nombres cortos de football-data con los nombres completos de las casas", () => {
+    const known = ["man city", "man united", "nott m forest", "wolves", "tottenham", "ath madrid", "ath bilbao",
+      "ein frankfurt", "m gladbach", "bayern munich", "dortmund", "leverkusen", "espanol", "sociedad", "vallecano",
+      "betis", "real madrid", "celta", "st pauli", "koln", "newcastle", "leeds", "west ham"];
+    const expect: Array<[string, string]> = [
+      ["Manchester City", "man city"], ["Manchester United", "man united"], ["Nottingham Forest", "nott m forest"],
+      ["Wolverhampton Wanderers", "wolves"], ["Tottenham Hotspur", "tottenham"], ["Atletico Madrid", "ath madrid"],
+      ["Athletic Club", "ath bilbao"], ["Athletic Bilbao", "ath bilbao"], ["Eintracht Frankfurt", "ein frankfurt"],
+      ["Borussia Monchengladbach", "m gladbach"], ["Bayern München", "bayern munich"], ["Borussia Dortmund", "dortmund"],
+      ["Bayer 04 Leverkusen", "leverkusen"], ["RCD Espanyol", "espanol"], ["Real Sociedad", "sociedad"],
+      ["Rayo Vallecano", "vallecano"], ["Real Betis", "betis"], ["Celta Vigo", "celta"], ["FC St. Pauli", "st pauli"],
+      ["1. FC Köln", "koln"], ["Newcastle United", "newcastle"], ["Leeds United", "leeds"], ["West Ham United", "west ham"],
+    ];
+    for (const [full, short] of expect) assert.equal(resolveName(full, known), short, `${full} -> ${short}`);
+    assert.equal(resolveName("Real Madrid", known), "real madrid");
+    assert.equal(resolveName("Equipo Desconocido", known), null);
   });
 });

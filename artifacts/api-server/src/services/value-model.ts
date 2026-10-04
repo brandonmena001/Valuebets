@@ -1,6 +1,7 @@
 import { and, eq, gt, gte, inArray, lt } from "drizzle-orm";
 import {
   db,
+  historicalResultsTable,
   matchesTable,
   matchStatsTable,
   modelPredictionsTable,
@@ -38,7 +39,28 @@ export async function loadFinishedHistory(now: Date): Promise<HistoryMatch[]> {
     .leftJoin(matchStatsTable, eq(matchesTable.id, matchStatsTable.matchId))
     .where(and(eq(matchesTable.status, "finished"), lt(matchesTable.kickoff, now)));
 
-  return rows;
+  // football-data.co.uk es la fuente principal; los terminados de `matches` solo se usan
+  // en ligas sin historial importado (el plan gratuito de API-Football no cubre la temporada actual).
+  const imported = await db.select().from(historicalResultsTable).where(lt(historicalResultsTable.kickoff, now));
+  const covered = new Set(imported.map((row) => row.leagueCode));
+  const fromImport: HistoryMatch[] = imported.map((row) => ({
+    id: -row.id,
+    leagueCode: row.leagueCode,
+    homeTeam: row.homeTeam,
+    awayTeam: row.awayTeam,
+    kickoff: row.kickoff,
+    homeScore: row.homeScore,
+    awayScore: row.awayScore,
+    homeCorners: row.homeCorners,
+    awayCorners: row.awayCorners,
+    homeYellowCards: row.homeYellowCards,
+    awayYellowCards: row.awayYellowCards,
+    homeRedCards: row.homeRedCards,
+    awayRedCards: row.awayRedCards,
+    homeShotsOnTarget: row.homeShotsOnTarget,
+    awayShotsOnTarget: row.awayShotsOnTarget,
+  }));
+  return [...fromImport, ...rows.filter((row) => !covered.has(row.leagueCode))];
 }
 
 /**

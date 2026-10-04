@@ -25,3 +25,4 @@ export * from "./model-predictions";
 export * from "./source-status";
 export * from "./provider-tournaments";
 export * from "./prediction-log";
+export * from "./historical-results";

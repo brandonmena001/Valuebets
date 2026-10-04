@@ -33,6 +33,7 @@ import {
   type OddsPapiQuota,
   type TournamentRef,
 } from "./oddspapi";
+import { importFootballData } from "./football-data";
 import { refreshModelPredictions } from "./value-model";
 
 export type SyncScope = "all" | "fixtures" | "odds" | "stats";
@@ -203,8 +204,11 @@ function apiFootballError(error: unknown): { message: string; statusCode?: numbe
     typeof error === "object" && error != null && "statusCode" in error
       ? Number((error as { statusCode?: unknown }).statusCode)
       : undefined;
+  const raw = shortError(error, "api-football");
   return {
-    message: shortError(error, "api-football"),
+    message: /free plans? do not have access/i.test(raw)
+      ? "El plan gratuito de API-Football no incluye la temporada actual (solo 2022–2024). El historial del modelo se importa de football-data.co.uk; las cuotas siguen llegando de OddsPapi."
+      : raw,
     statusCode: Number.isFinite(statusCode) ? statusCode : undefined,
   };
 }
@@ -800,6 +804,11 @@ async function runSync(options: SyncOptions): Promise<void> {
         return { records, errors, succeeded };
       },
     );
+  }
+  if (wantFixtures || wantStats) {
+    // Historial gratuito (football-data.co.uk): no depende del plan de API-Football.
+    const history = await importFootballData({ force: !options.scheduled });
+    if (history.errors.length) logger.warn({ errors: history.errors }, "football-data import had errors");
   }
   if (useOddsPapi && wantOdds) {
     await runProviderTask("oddspapi", "cuotas", async () => {
