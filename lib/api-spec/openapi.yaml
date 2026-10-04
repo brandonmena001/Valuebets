@@ -356,6 +356,12 @@ components:
             confidence:
               type: string
               enum: [low, medium, high]
+            marketProbability:
+              type: [number, "null"]
+            kellyFraction:
+              type: [number, "null"]
+            bookmakersCount:
+              type: [integer, "null"]
           required:
             - fixtureId
             - league
@@ -377,7 +383,108 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/OddsQuote"
-      required: [match, odds]
+        model:
+          oneOf:
+            - $ref: "#/components/schemas/MatchModel"
+            - type: "null"
+      required: [match, odds, model]
+    LineProbability:
+      type: object
+      properties:
+        line:
+          type: number
+        over:
+          type: number
+          minimum: 0
+          maximum: 1
+      required: [line, over]
+    MatchModel:
+      type: object
+      description: Pure model reading of a scheduled match (not blended with the market).
+      properties:
+        modelVersion:
+          type: string
+        expectedGoals:
+          type: object
+          properties:
+            home:
+              type: number
+            away:
+              type: number
+          required: [home, away]
+        result:
+          type: object
+          properties:
+            home:
+              type: number
+            draw:
+              type: number
+            away:
+              type: number
+          required: [home, draw, away]
+        btts:
+          type: number
+          minimum: 0
+          maximum: 1
+        topScores:
+          type: array
+          items:
+            type: object
+            properties:
+              home:
+                type: integer
+              away:
+                type: integer
+              probability:
+                type: number
+            required: [home, away, probability]
+        goalLines:
+          type: array
+          items:
+            $ref: "#/components/schemas/LineProbability"
+        teamStats:
+          type: array
+          items:
+            type: object
+            properties:
+              stat:
+                type: string
+                enum: [corners, cards, shots-on-target]
+              homeExpected:
+                type: number
+              awayExpected:
+                type: number
+              totalExpected:
+                type: number
+              lines:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LineProbability"
+            required: [stat, homeExpected, awayExpected, totalExpected, lines]
+        dataQuality:
+          type: object
+          properties:
+            score:
+              type: integer
+              minimum: 0
+              maximum: 100
+            level:
+              type: string
+              enum: [low, medium, high]
+            homeSample:
+              type: number
+            awaySample:
+              type: number
+          required: [score, level, homeSample, awaySample]
+      required:
+        - modelVersion
+        - expectedGoals
+        - result
+        - btts
+        - topScores
+        - goalLines
+        - teamStats
+        - dataQuality
     SourceHealth:
       type: object
       properties:

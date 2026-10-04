@@ -63,7 +63,10 @@ export const GetDashboardSummaryResponse = zod.object({
   "expectedValuePct": zod.number(),
   "modelVersion": zod.string(),
   "sampleSize": zod.number().int().min(getDashboardSummaryResponseTopValueBetsItemTwoSampleSizeMin),
-  "confidence": zod.enum(['low', 'medium', 'high'])
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "marketProbability": zod.number().nullish(),
+  "kellyFraction": zod.number().nullish(),
+  "bookmakersCount": zod.number().int().nullish()
 })))
 })
 
@@ -117,7 +120,10 @@ export const GetValueBetsResponseItem = zod.object({
   "expectedValuePct": zod.number(),
   "modelVersion": zod.string(),
   "sampleSize": zod.number().int().min(getValueBetsResponseTwoSampleSizeMin),
-  "confidence": zod.enum(['low', 'medium', 'high'])
+  "confidence": zod.enum(['low', 'medium', 'high']),
+  "marketProbability": zod.number().nullish(),
+  "kellyFraction": zod.number().nullish(),
+  "bookmakersCount": zod.number().int().nullish()
 }))
 export const GetValueBetsResponse = zod.array(GetValueBetsResponseItem)
 
@@ -171,6 +177,18 @@ export const GetMatchDetailParams = zod.object({
 
 export const getMatchDetailResponseOddsItemDecimalOddsExclusiveMin = 1;
 
+export const getMatchDetailResponseModelOneBttsMin = 0;
+export const getMatchDetailResponseModelOneBttsMax = 1;
+
+export const getMatchDetailResponseModelOneGoalLinesItemOverMin = 0;
+export const getMatchDetailResponseModelOneGoalLinesItemOverMax = 1;
+
+export const getMatchDetailResponseModelOneTeamStatsItemLinesItemOverMin = 0;
+export const getMatchDetailResponseModelOneTeamStatsItemLinesItemOverMax = 1;
+
+export const getMatchDetailResponseModelOneDataQualityScoreMin = 0;
+export const getMatchDetailResponseModelOneDataQualityScoreMax = 100;
+
 
 
 export const GetMatchDetailResponse = zod.object({
@@ -209,7 +227,45 @@ export const GetMatchDetailResponse = zod.object({
   "source": zod.enum(['api-football', 'oddspapi']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
+})),
+  "model": zod.union([zod.object({
+  "modelVersion": zod.string(),
+  "expectedGoals": zod.object({
+  "home": zod.number(),
+  "away": zod.number()
+}),
+  "result": zod.object({
+  "home": zod.number(),
+  "draw": zod.number(),
+  "away": zod.number()
+}),
+  "btts": zod.number().min(getMatchDetailResponseModelOneBttsMin).max(getMatchDetailResponseModelOneBttsMax),
+  "topScores": zod.array(zod.object({
+  "home": zod.number().int(),
+  "away": zod.number().int(),
+  "probability": zod.number()
+})),
+  "goalLines": zod.array(zod.object({
+  "line": zod.number(),
+  "over": zod.number().min(getMatchDetailResponseModelOneGoalLinesItemOverMin).max(getMatchDetailResponseModelOneGoalLinesItemOverMax)
+})),
+  "teamStats": zod.array(zod.object({
+  "stat": zod.enum(['corners', 'cards', 'shots-on-target']),
+  "homeExpected": zod.number(),
+  "awayExpected": zod.number(),
+  "totalExpected": zod.number(),
+  "lines": zod.array(zod.object({
+  "line": zod.number(),
+  "over": zod.number().min(getMatchDetailResponseModelOneTeamStatsItemLinesItemOverMin).max(getMatchDetailResponseModelOneTeamStatsItemLinesItemOverMax)
 }))
+})),
+  "dataQuality": zod.object({
+  "score": zod.number().int().min(getMatchDetailResponseModelOneDataQualityScoreMin).max(getMatchDetailResponseModelOneDataQualityScoreMax),
+  "level": zod.enum(['low', 'medium', 'high']),
+  "homeSample": zod.number(),
+  "awaySample": zod.number()
+})
+}).describe('Pure model reading of a scheduled match (not blended with the market).'),zod.null()])
 })
 
 

@@ -125,7 +125,7 @@ export const ValueBetConfidence = {
   high: 'high',
 } as const;
 
-export type ValueBet = OddsQuote & {
+export type ValueBet = OddsQuote & ({
   fixtureId: string;
   league: LeagueCode;
   homeTeam: string;
@@ -143,11 +143,99 @@ export type ValueBet = OddsQuote & {
   /** @minimum 0 */
   sampleSize: number;
   confidence: ValueBetConfidence;
+  /** @nullable */
+  marketProbability?: number | null;
+  /** @nullable */
+  kellyFraction?: number | null;
+  /** @nullable */
+  bookmakersCount?: number | null;
+});
+
+export interface LineProbability {
+  line: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  over: number;
+}
+
+export type MatchModelTeamStatsItemStat = typeof MatchModelTeamStatsItemStat[keyof typeof MatchModelTeamStatsItemStat];
+
+
+export const MatchModelTeamStatsItemStat = {
+  corners: 'corners',
+  cards: 'cards',
+  'shots-on-target': 'shots-on-target',
+} as const;
+
+export type MatchModelDataQualityLevel = typeof MatchModelDataQualityLevel[keyof typeof MatchModelDataQualityLevel];
+
+
+export const MatchModelDataQualityLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export type MatchModelExpectedGoals = {
+  home: number;
+  away: number;
 };
+
+export type MatchModelResult = {
+  home: number;
+  draw: number;
+  away: number;
+};
+
+export type MatchModelTopScoresItem = {
+  home: number;
+  away: number;
+  probability: number;
+};
+
+export type MatchModelTeamStatsItem = {
+  stat: MatchModelTeamStatsItemStat;
+  homeExpected: number;
+  awayExpected: number;
+  totalExpected: number;
+  lines: LineProbability[];
+};
+
+export type MatchModelDataQuality = {
+  /**
+     * @minimum 0
+     * @maximum 100
+     */
+  score: number;
+  level: MatchModelDataQualityLevel;
+  homeSample: number;
+  awaySample: number;
+};
+
+/**
+ * Pure model reading of a scheduled match (not blended with the market).
+ */
+export interface MatchModel {
+  modelVersion: string;
+  expectedGoals: MatchModelExpectedGoals;
+  result: MatchModelResult;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  btts: number;
+  topScores: MatchModelTopScoresItem[];
+  goalLines: LineProbability[];
+  teamStats: MatchModelTeamStatsItem[];
+  dataQuality: MatchModelDataQuality;
+}
 
 export interface MatchDetail {
   match: MatchSummary;
   odds: OddsQuote[];
+  model: MatchModel | null;
 }
 
 export interface SourceHealth {

@@ -24,6 +24,10 @@ export const modelPredictionsTable = pgTable(
     modelVersion: text("model_version").notNull(),
     sampleSize: integer("sample_size").notNull(),
     confidence: text("confidence").notNull(),
+    rawModelProbability: doublePrecision("raw_model_probability"),
+    marketProbability: doublePrecision("market_probability"),
+    kellyFraction: doublePrecision("kelly_fraction"),
+    bookmakersCount: integer("bookmakers_count"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

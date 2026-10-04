@@ -9,7 +9,7 @@ import type { LeagueCode } from './leagueCode';
 import type { OddsQuote } from './oddsQuote';
 import type { ValueBetConfidence } from './valueBetConfidence';
 
-export type ValueBet = OddsQuote & {
+export type ValueBet = OddsQuote & ({
   fixtureId: string;
   league: LeagueCode;
   homeTeam: string;
@@ -27,4 +27,10 @@ export type ValueBet = OddsQuote & {
   /** @minimum 0 */
   sampleSize: number;
   confidence: ValueBetConfidence;
-};
+  /** @nullable */
+  marketProbability?: number | null;
+  /** @nullable */
+  kellyFraction?: number | null;
+  /** @nullable */
+  bookmakersCount?: number | null;
+});

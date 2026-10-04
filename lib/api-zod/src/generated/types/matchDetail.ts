@@ -5,10 +5,12 @@
  * API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { MatchModel } from './matchModel';
 import type { MatchSummary } from './matchSummary';
 import type { OddsQuote } from './oddsQuote';
 
 export interface MatchDetail {
   match: MatchSummary;
   odds: OddsQuote[];
+  model: MatchModel | null;
 }

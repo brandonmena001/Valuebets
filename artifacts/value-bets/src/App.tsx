@@ -3,12 +3,12 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import {
   Activity, AlertCircle, ArrowUpRight, CalendarClock, ChartNoAxesCombined,
   Check, ChevronRight, CircleDot, Database, FileSearch, Gauge, RefreshCw,
-  Search, ShieldCheck, Signal, Sparkles, X,
+  Search, ShieldCheck, Signal, Sparkles, Ticket, X,
 } from 'lucide-react';
 import {
   getGetDashboardSummaryQueryKey, getGetMatchesQueryKey, getGetSourceStatusQueryKey,
-  getGetValueBetsQueryKey, getGetMatchDetailQueryKey, useGetDashboardSummary,
-  useGetMatches, useGetMatchDetail, useGetSourceStatus, useGetValueBets, useRequestDataSync,
+  getGetValueBetsQueryKey, useGetDashboardSummary,
+  useGetMatches, useGetSourceStatus, useGetValueBets, useRequestDataSync,
 } from '@workspace/api-client-react';
 import type {
   GetMatchesParams, MatchSummary, Provider,
@@ -19,6 +19,10 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
+import MatchAnalysisPage from '@/pages/match-analysis';
+import SlipPage from '@/pages/slip';
+import { BetCards } from '@/components/bet-cards';
+import { SlipProvider, useSlip } from '@/lib/slip';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: false } },
@@ -78,7 +82,8 @@ function EmptyState({ title, copy }: { title: string; copy: string }) {
 }
 function AppShell({ children }: { children: ReactNode }) {
   const [location] = useLocation();
-  const active = location === '/' ? 'overview' : location.slice(1);
+  const active = location === '/' ? 'overview' : location.startsWith('/match/') ? 'matches' : location.slice(1);
+  const { items: slipItems } = useSlip();
   const [clock, setClock] = useState(new Date());
   const { data: sourceStatus } = useGetSourceStatus();
   useEffect(() => {
@@ -105,6 +110,7 @@ function AppShell({ children }: { children: ReactNode }) {
   const nav = [
     { href: '/', label: 'Resumen', icon: ChartNoAxesCombined, id: 'overview' },
     { href: '/matches', label: 'Partidos', icon: Activity, id: 'matches' },
+    { href: '/slip', label: 'Cupón', icon: Ticket, id: 'slip' },
     { href: '/sources', label: 'Fuentes', icon: Database, id: 'sources' },
   ];
   return <div className="app-shell">
@@ -116,7 +122,7 @@ function AppShell({ children }: { children: ReactNode }) {
       <div className="nav-label">Observatorio</div>
       <nav aria-label="Navegación principal">
         {nav.map(({ href, label, icon: Icon, id }) => <Link key={href} href={href} className={`nav-link ${active === id ? 'active' : ''}`} data-testid={`link-${id}`}>
-          <Icon size={16} strokeWidth={1.8} /><span>{label}</span>
+          <Icon size={16} strokeWidth={1.8} /><span>{label}</span>{id === 'slip' && slipItems.length > 0 && <span className="fd-badge" data-testid="badge-slip-count">{slipItems.length}</span>}
         </Link>)}
       </nav>
       <div className="side-bottom">
@@ -157,26 +163,11 @@ function Metric({ label, value, foot, icon: Icon }: { label: string; value: Reac
     <div className="metric-foot"><Icon size={11} style={{ verticalAlign: 'middle', marginRight: 5 }} />{foot}</div>
   </div>;
 }
-function BetRows({ bets, onSelect }: { bets: ValueBet[]; onSelect: (fixtureId: string) => void }) {
-  if (!bets.length) return <EmptyState title="Sin señales cualificadas" copy="No hay apuestas de valor disponibles con los datos actuales del modelo." />;
-  return <div className="table-wrap"><table className="bet-table">
-    <thead><tr><th>Encuentro / liga</th><th>Mercado</th><th>Cuota</th><th>Prob. modelo</th><th>Valor esperado</th><th>Confianza</th></tr></thead>
-    <tbody>{bets.map(bet => <tr className="bet-row" key={bet.id} onClick={() => onSelect(bet.fixtureId)} data-testid={`row-value-bet-${bet.id}`} style={{ cursor: 'pointer' }}>
-      <td><div className="team-pair">{bet.homeTeam} <span style={{ color: 'hsl(var(--muted-foreground))' }}>—</span> {bet.awayTeam}</div><div className="subline">{leagues[bet.league] ?? bet.league} · {formatDate(bet.kickoff, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</div></td>
-      <td><div>{bet.selection}</div>{bet.playerName && <div className="subline">Jugador · {bet.playerName}</div>}<div className="subline">{bet.marketName}{bet.line == null ? '' : ` · ${bet.line}`}</div></td>
-      <td><span className="mono">{formatValue(bet.decimalOdds, 2)}</span><div className="subline">{bet.bookmaker}</div></td>
-      <td className="mono">{formatValue(bet.modelProbability * 100, 1)}%</td>
-      <td><span className="ev-pill">{bet.expectedValuePct > 0 ? '+' : ''}{formatValue(bet.expectedValuePct, 1)}%</span></td>
-      <td><span className={`confidence ${bet.confidence}`}>{bet.confidence === 'high' ? 'Alta' : bet.confidence === 'medium' ? 'Media' : 'Baja'}</span></td>
-    </tr>)}</tbody>
-  </table></div>;
-}
-
 function DashboardPage() {
   const { data: summary, isLoading, isError, refetch } = useGetDashboardSummary();
   const betsQuery = useGetValueBets();
   const sourceQuery = useGetSourceStatus();
-  const [selected, setSelected] = useState<string | null>(null);
+  const [, navigate] = useLocation();
   const bets = betsQuery.data ?? summary?.topValueBets ?? [];
   const shownBets = summary?.topValueBets?.length ? summary.topValueBets : bets;
   const allSourceOk = sourceQuery.data?.sources?.every(source => source.state === 'ok');
@@ -201,7 +192,7 @@ function DashboardPage() {
           </div>
           {betsQuery.isError && <ErrorNotice message="No se pudieron cargar las señales del mercado." retry={() => { void betsQuery.refetch(); }} />}
           {betsQuery.isLoading && !summary ? <div style={{ padding: 18 }}><SkeletonBlock height={210} /></div> :
-            <BetRows bets={shownBets} onSelect={setSelected} />}
+            <BetCards bets={shownBets} onSelect={id => navigate(`/match/${id}`)} />}
         </section>
         <section className="panel signal-panel">
           <div className="section-head"><div><div className="section-kicker">Integridad de datos</div><div className="section-title">Señal de origen</div></div><ShieldCheck size={17} color="hsl(var(--primary))" /></div>
@@ -224,7 +215,6 @@ function DashboardPage() {
       </div>
     </>}
     {!isLoading && !summary && !isError && <div className="panel"><EmptyState title="Esperando datos del servidor" copy="El resumen aparecerá cuando la API publique una respuesta." /></div>}
-    {selected && <MatchDetailModal fixtureId={selected} onClose={() => setSelected(null)} />}
   </>;
 }
 
@@ -233,7 +223,7 @@ function MatchPage() {
   const [status, setStatus] = useState('');
   const [days, setDays] = useState('7');
   const [search, setSearch] = useState('');
-  const [selected, setSelected] = useState<string | null>(null);
+  const [, navigate] = useLocation();
   const params = useMemo<GetMatchesParams>(() => ({
     ...(league ? { league: league as GetMatchesParams['league'] } : {}),
     ...(status ? { status: status as GetMatchesParams['status'] } : {}),
@@ -261,10 +251,9 @@ function MatchPage() {
     </div>
     {isError && <ErrorNotice message="No se pudo obtener el calendario. El servidor puede estar temporalmente indisponible." retry={() => { void refetch(); }} />}
     {isLoading ? <div className="match-list">{[0, 1, 2, 3].map(i => <SkeletonBlock key={i} height={96} />)}</div> :
-      filtered.length ? <div className="match-list" data-testid="list-matches">{filtered.map(match => <MatchCard key={match.fixtureId} match={match} onClick={() => setSelected(match.fixtureId)} />)}</div> :
+      filtered.length ? <div className="match-list" data-testid="list-matches">{filtered.map(match => <MatchCard key={match.fixtureId} match={match} onClick={() => navigate(`/match/${match.fixtureId}`)} />)}</div> :
       !isError && <div className="panel"><EmptyState title={search ? 'No hay coincidencias' : 'No hay partidos en este periodo'} copy={search ? 'Prueba con otro nombre o cambia los filtros.' : 'La API no ha devuelto fixtures para los filtros seleccionados.'} /></div>}
     {data && <div className="footer-note">Mostrando {filtered.length} de {data.length} partidos devueltos por la API{isFetching ? ' · actualizando' : ''}. La cobertura corresponde a mercados recibidos, no a disponibilidad garantizada.</div>}
-    {selected && <MatchDetailModal fixtureId={selected} onClose={() => setSelected(null)} />}
   </>;
 }
 function MatchCard({ match, onClick }: { match: MatchSummary; onClick: () => void }) {
@@ -274,45 +263,6 @@ function MatchCard({ match, onClick }: { match: MatchSummary; onClick: () => voi
     <div><div className="coverage-label">Mercados disponibles · {match.availableMarkets.length}</div><div className="market-chips">{match.availableMarkets.length ? match.availableMarkets.map(market => <span className="market-chip" key={market}>{marketNames[market] ?? market}</span>) : <span className="subline">Sin cobertura reportada</span>}</div></div>
     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}><div className="subline">Act. {formatDate(match.lastUpdatedAt, { hour: '2-digit', minute: '2-digit' })}</div><ChevronRight size={15} color="hsl(var(--muted-foreground))" /></div>
   </button>;
-}
-
-function MatchDetailModal({ fixtureId, onClose }: { fixtureId: string; onClose: () => void }) {
-  const { data, isLoading, isError, refetch } = useGetMatchDetail(fixtureId, {
-    query: { enabled: !!fixtureId, queryKey: getGetMatchDetailQueryKey(fixtureId) },
-  });
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
-  const match = data?.match;
-  const stats = match?.stats;
-  return <div className="modal-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
-    <section className="detail-modal" role="dialog" aria-modal="true" aria-label="Detalle del partido" data-testid="dialog-match-detail">
-      <div className="detail-header"><div><div className="eyebrow">{match ? leagues[match.league] ?? match.league : 'Detalle del fixture'}</div><div className="section-title">{match ? `${match.homeTeam} — ${match.awayTeam}` : 'Cargando partido'}</div><div className="subline">{match ? `${formatDate(match.kickoff)} · ${match.country}` : ''}</div></div><button className="icon-button" onClick={onClose} aria-label="Cerrar detalle"><X size={18} /></button></div>
-      <div className="detail-body">
-        {isLoading && <SkeletonBlock height={220} />}
-        {isError && <ErrorNotice message="No se pudo cargar el detalle del encuentro." retry={() => { void refetch(); }} />}
-        {match && <>
-          <div className="section-kicker">Estadísticas automáticas · {formatDate(match.lastUpdatedAt)}</div>
-          <div className="stats-grid">
-            {[
-              ['Córners', stats?.homeCorners, stats?.awayCorners],
-              ['Tarjetas amarillas', stats?.homeYellowCards, stats?.awayYellowCards],
-              ['Tarjetas rojas', stats?.homeRedCards, stats?.awayRedCards],
-              ['Tiros a puerta', stats?.homeShotsOnTarget, stats?.awayShotsOnTarget],
-            ].map(([label, home, away]) => <div className="stat-cell" key={String(label)}>
-              <div className="stat-name">{label}</div><div className="stat-value">{home ?? '—'} <span style={{ color: 'hsl(var(--muted-foreground))' }}>:</span> {away ?? '—'}</div>
-            </div>)}
-          </div>
-          <div className="section-head" style={{ padding: '0 0 10px', border: 0 }}><div><div className="section-kicker">Cuotas recibidas</div><div className="section-title">Mercados · {data.odds.length}</div></div></div>
-          {data.odds.length ? <div className="table-wrap"><table className="bet-table"><thead><tr><th>Mercado / selección</th><th>Casa</th><th>Cuota</th><th>Fuente / captura</th></tr></thead><tbody>{data.odds.map(odd => <tr key={odd.id} data-testid={`row-odds-${odd.id}`}>
-            <td>{odd.marketName}<div className="subline">{odd.selection}{odd.line == null ? '' : ` · ${odd.line}`}</div>{odd.playerName && <div className="subline">Jugador · {odd.playerName}</div>}</td><td>{odd.bookmaker}</td><td className="mono">{formatValue(odd.decimalOdds, 2)}</td><td>{providerNames[odd.source] ?? odd.source}<div className="subline">{formatDate(odd.capturedAt, { hour: '2-digit', minute: '2-digit' })}</div></td>
-          </tr>)}</tbody></table></div> : <EmptyState title="Sin cuotas recibidas" copy="La respuesta del servidor no incluye cuotas para este encuentro." />}
-        </>}
-      </div>
-    </section>
-  </div>;
 }
 
 function SourcesPage() {
@@ -390,6 +340,8 @@ function Router() {
       <Switch>
         <Route path="/" component={DashboardPage} />
         <Route path="/matches" component={MatchPage} />
+        <Route path="/match/:fixtureId" component={MatchAnalysisPage} />
+        <Route path="/slip" component={SlipPage} />
         <Route path="/sources" component={SourcesPage} />
         <Route component={NotFound} />
       </Switch>
@@ -398,7 +350,7 @@ function Router() {
 }
 function App() {
   return <QueryClientProvider client={queryClient}>
-    <TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter><Toaster /></TooltipProvider>
+    <SlipProvider><TooltipProvider><WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}><Router /></WouterRouter><Toaster /></TooltipProvider></SlipProvider>
   </QueryClientProvider>;
 }
 

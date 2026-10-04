@@ -80,35 +80,37 @@
 }
 
 .dark {
-  --background: 169 25% 10%;
-  --foreground: 42 28% 91%;
-  --border: 169 17% 25%;
-  --input: 169 17% 25%;
-  --ring: 67 69% 66%;
-  --card: 169 24% 13%;
-  --card-foreground: 42 28% 91%;
-  --card-border: 169 17% 25%;
-  --popover: 169 24% 13%;
-  --popover-foreground: 42 28% 91%;
-  --popover-border: 169 17% 25%;
-  --primary: 67 69% 66%;
-  --primary-foreground: 169 26% 13%;
-  --secondary: 169 18% 20%;
-  --secondary-foreground: 42 28% 91%;
-  --muted: 169 18% 20%;
-  --muted-foreground: 42 12% 64%;
-  --accent: 158 42% 31%;
-  --accent-foreground: 42 28% 91%;
-  --destructive: 2 61% 52%;
-  --destructive-foreground: 42 35% 98%;
-  --sidebar: 169 29% 8%;
-  --sidebar-foreground: 42 28% 91%;
-  --sidebar-border: 169 20% 19%;
-  --sidebar-primary: 67 69% 66%;
-  --sidebar-primary-foreground: 169 26% 13%;
-  --sidebar-accent: 169 22% 16%;
-  --sidebar-accent-foreground: 42 28% 94%;
-  --sidebar-ring: 67 69% 66%;
+  --background: 150 22% 5%;
+  --foreground: 140 18% 93%;
+  --border: 145 22% 17%;
+  --input: 145 22% 17%;
+  --ring: 145 80% 48%;
+  --card: 150 20% 8%;
+  --card-foreground: 140 18% 93%;
+  --card-border: 145 22% 17%;
+  --popover: 150 20% 8%;
+  --popover-foreground: 140 18% 93%;
+  --popover-border: 145 22% 17%;
+  --primary: 145 80% 48%;
+  --primary-foreground: 150 30% 6%;
+  --secondary: 150 16% 13%;
+  --secondary-foreground: 140 18% 93%;
+  --muted: 150 16% 13%;
+  --muted-foreground: 140 8% 62%;
+  --accent: 145 50% 22%;
+  --accent-foreground: 140 18% 93%;
+  --destructive: 0 72% 58%;
+  --destructive-foreground: 140 18% 96%;
+  --sidebar: 150 25% 4%;
+  --sidebar-foreground: 140 18% 93%;
+  --sidebar-border: 145 22% 14%;
+  --sidebar-primary: 145 80% 48%;
+  --sidebar-primary-foreground: 150 30% 6%;
+  --sidebar-accent: 150 20% 11%;
+  --sidebar-accent-foreground: 140 18% 96%;
+  --sidebar-ring: 145 80% 48%;
+  --gold: 43 92% 62%;
+  --cyan: 190 90% 60%;
 }
 
 @layer base {
@@ -272,3 +274,84 @@ h1 { font-family:var(--app-font-serif); font-size:36px; font-weight:500; letter-
   .schedule-strip { align-items:flex-start; flex-direction:column; }.stats-grid { grid-template-columns:repeat(2,1fr); }
   .mobile-menu { display:block; }
 }
+
+/* ===== Análisis de partido, value bets y cupón ===== */
+.fd-page { display:flex; flex-direction:column; gap:14px; max-width:760px; margin:0 auto; }
+.fd-title { display:flex; align-items:center; gap:9px; font-size:24px; margin:0 0 2px; }
+.fd-back { display:inline-flex; align-items:center; gap:4px; font-size:13px; color:hsl(var(--muted-foreground)); text-decoration:none; width:fit-content; }
+.fd-card { background:linear-gradient(160deg,hsl(var(--card)),hsl(150 22% 6%)); border:1px solid hsl(var(--border)); border-radius:16px; padding:16px; box-shadow:0 0 24px hsl(145 80% 48% / .05); }
+.fd-h { font-size:12px; font-weight:700; letter-spacing:.09em; text-transform:uppercase; margin:0 0 12px; color:hsl(var(--foreground)); }
+.fd-sub { font-size:11px; font-weight:600; letter-spacing:.06em; text-transform:uppercase; margin:16px 0 8px; color:hsl(var(--muted-foreground)); }
+.fd-label { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:hsl(var(--muted-foreground)); }
+.fd-chip { display:inline-block; font-size:11px; padding:1px 8px; border-radius:6px; border:1px solid hsl(var(--border)); color:hsl(var(--muted-foreground)); }
+.fd-cyan { color:hsl(var(--cyan)); } .fd-gold { color:hsl(var(--gold)); } .fd-good { color:hsl(var(--primary)); } .fd-bad { color:hsl(var(--destructive)); } .fd-muted { color:hsl(var(--muted-foreground)); }
+
+.fd-hero { text-align:center; }
+.fd-hero-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.fd-versus { display:grid; grid-template-columns:1fr auto 1fr; align-items:center; gap:10px; }
+.fd-team-name { font-weight:600; font-size:14px; } .fd-team-name.big { font-size:18px; }
+.fd-vs { font-size:12px; font-weight:700; padding:8px 12px; border-radius:10px; border:1px solid hsl(var(--border)); color:hsl(var(--muted-foreground)); }
+.fd-xg { margin-top:14px; font-size:14px; color:hsl(var(--muted-foreground)); } .fd-xg strong { color:hsl(var(--gold)); font-size:16px; }
+.fd-quality { display:flex; align-items:center; gap:14px; margin-top:14px; text-align:left; padding:12px; border-radius:12px; border:1px solid hsl(var(--border)); }
+.fd-quality-score { font-size:34px; font-weight:700; color:hsl(var(--primary)); line-height:1; } .fd-quality-score span { font-size:11px; color:hsl(var(--muted-foreground)); margin-left:2px; }
+.fd-quality-title { font-size:13px; font-weight:600; margin-bottom:6px; color:hsl(var(--primary)); }
+
+.fd-bar { position:relative; height:6px; border-radius:6px; background:hsl(var(--secondary)); overflow:visible; margin:6px 0; }
+.fd-bar-fill { height:100%; border-radius:6px; background:linear-gradient(90deg,hsl(145 70% 32%),hsl(var(--primary))); }
+.fd-bar-mark { position:absolute; top:-3px; width:2px; height:12px; background:hsl(var(--gold)); border-radius:2px; }
+.fd-bar-row { margin-top:10px; } .fd-bar-copy { font-size:12px; color:hsl(var(--muted-foreground)); } .fd-bar-copy strong { color:hsl(var(--cyan)); }
+
+.fd-triple { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.fd-prob { padding:12px 8px; border-radius:12px; border:1px solid hsl(var(--border)); text-align:center; display:flex; flex-direction:column; gap:4px; align-items:center; }
+.fd-prob.home { border-color:hsl(var(--gold) / .45); } .fd-prob.away { border-color:hsl(var(--cyan) / .45); }
+.fd-big { font-size:22px; font-weight:700; } .fd-prob.home .fd-big { color:hsl(var(--gold)); } .fd-prob.away .fd-big { color:hsl(var(--cyan)); }
+.fd-prob .fd-bar { width:100%; }
+
+.fd-pick { display:flex; justify-content:space-between; align-items:center; padding:9px 0; border-top:1px solid hsl(var(--border)); }
+.fd-pick-name { font-size:14px; } .fd-pick-right { display:flex; align-items:center; gap:10px; }
+.fd-scores { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.fd-score { padding:12px 6px; text-align:center; border-radius:12px; border:1px solid hsl(var(--border)); } .fd-score.top { border-color:hsl(var(--gold) / .5); background:hsl(var(--gold) / .06); }
+.fd-score-line { font-size:20px; font-weight:700; }
+
+.fd-lines-head,.fd-lines-row { display:grid; grid-template-columns:.6fr 1fr 1fr; gap:8px; align-items:center; padding:7px 0; font-size:13px; }
+.fd-lines-head { font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:hsl(var(--muted-foreground)); }
+.fd-lines-row { border-top:1px solid hsl(var(--border)); } .fd-lines-cell { display:flex; align-items:center; gap:8px; } .fd-lines-cell em { font-style:normal; min-width:36px; }
+.fd-duo { display:grid; grid-template-columns:1fr 1fr; gap:8px; } .fd-team-box { padding:12px; border-radius:12px; border:1px solid hsl(var(--primary) / .3); text-align:center; }
+.fd-expected { font-size:22px; font-weight:700; color:hsl(var(--gold)); }
+
+.fd-add { display:inline-flex; align-items:center; gap:5px; padding:6px 11px; border-radius:9px; border:1px solid hsl(var(--primary) / .5); background:transparent; color:hsl(var(--primary)); font-size:12px; font-weight:600; cursor:pointer; }
+.fd-add.compact { padding:5px; } .fd-add.active { background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); }
+
+.fd-bets { display:flex; flex-direction:column; gap:10px; padding:12px; }
+.fd-card .fd-bets { padding:0; }
+.fd-bet { border:1px solid hsl(var(--border)); border-radius:14px; padding:13px; background:hsl(150 20% 7%); }
+.fd-bet-top { display:flex; justify-content:space-between; gap:12px; } .fd-bet-right { text-align:right; flex-shrink:0; }
+.fd-bet-match { font-size:12px; color:hsl(var(--muted-foreground)); } .fd-bet-title { font-size:16px; font-weight:600; margin:2px 0; } .fd-bet-sub { font-size:12px; color:hsl(var(--muted-foreground)); }
+.fd-odds { font-size:22px; font-weight:700; color:hsl(var(--gold)); }
+.fd-ev { display:inline-block; margin-top:4px; padding:3px 9px; border-radius:8px; background:hsl(var(--primary) / .15); color:hsl(var(--primary)); font-weight:700; font-size:13px; }
+.fd-bet-foot { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-top:10px; flex-wrap:wrap; }
+
+.fd-badge { margin-left:6px; min-width:18px; height:18px; padding:0 5px; border-radius:9px; background:hsl(var(--primary)); color:hsl(var(--primary-foreground)); font-size:11px; font-weight:700; display:inline-flex; align-items:center; justify-content:center; }
+
+.fd-slip-item { display:flex; gap:10px; align-items:flex-start; } .fd-slip-stats { display:flex; justify-content:space-between; gap:12px; margin-top:10px; font-size:13px; color:hsl(var(--muted-foreground)); } .fd-slip-stats strong { color:hsl(var(--gold)); }
+.fd-input { width:100%; margin-top:6px; padding:12px; font-size:16px; }
+.fd-clear { width:100%; justify-content:center; }
+.fd-summary-top { display:flex; justify-content:space-between; font-size:13px; color:hsl(var(--muted-foreground)); margin-bottom:10px; }
+.fd-fair { font-size:54px; font-weight:700; line-height:1; color:hsl(var(--gold)); }
+.fd-result { margin-top:12px; padding:14px; border-radius:14px; border:1px solid hsl(var(--primary) / .5); background:hsl(var(--primary) / .08); } .fd-result.bad { border-color:hsl(var(--destructive) / .5); background:hsl(var(--destructive) / .08); }
+.fd-result-top { display:flex; justify-content:space-between; align-items:center; } .fd-result-ev { font-size:36px; font-weight:700; color:hsl(var(--primary)); } .fd-result.bad .fd-result-ev { color:hsl(var(--destructive)); }
+.fd-verdict { display:inline-flex; align-items:center; gap:5px; font-weight:700; font-size:13px; }
+.fd-result-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px; }
+.fd-hint { margin-top:12px; padding:11px; border-radius:10px; background:hsl(var(--secondary)); font-size:13px; display:flex; flex-direction:column; gap:4px; }
+.fd-prudent { margin-top:12px; padding:11px; border-radius:10px; border:1px dashed hsl(var(--gold) / .5); }
+
+@media (max-width: 767px) {
+  .fd-page { gap:12px; } .fd-fair { font-size:46px; } .fd-big { font-size:19px; }
+}
+
+/* Avisos y confianza legibles sobre fondo oscuro */
+.notice { border-color:hsl(var(--gold) / .35); background:hsl(var(--gold) / .08); color:hsl(var(--gold)); font-size:12px; border-radius:10px; }
+.notice.error { border-color:hsl(var(--destructive) / .45); background:hsl(var(--destructive) / .1); color:hsl(0 80% 78%); }
+.confidence { font-size:10px; font-weight:600; }
+.confidence.high { color:hsl(var(--primary)); } .confidence.medium { color:hsl(var(--gold)); } .confidence.low { color:hsl(0 75% 68%); }
+@media (max-width: 767px) { .breadcrumb { display:none; } .topbar { justify-content:flex-end; } }

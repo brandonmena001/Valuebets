@@ -39,6 +39,8 @@ import {
   type ProviderName,
   type SyncScope,
 } from "../services/collector";
+import { buildMatchSnapshot } from "../model/predict";
+import { loadFinishedHistory } from "../services/value-model";
 
 const router: IRouter = Router();
 
@@ -151,6 +153,9 @@ async function loadValueBets(filters: {
     modelVersion: prediction.modelVersion,
     sampleSize: prediction.sampleSize,
     confidence: prediction.confidence as "low" | "medium" | "high",
+    marketProbability: prediction.marketProbability,
+    kellyFraction: prediction.kellyFraction,
+    bookmakersCount: prediction.bookmakersCount,
   }));
 }
 
@@ -346,8 +351,13 @@ router.get("/matches/:fixtureId", async (req, res): Promise<void> => {
     [row.match.updatedAt, row.stats?.updatedAt, latestQuote]
       .filter((value): value is Date => value instanceof Date)
       .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
+  const model =
+    row.match.status === "scheduled"
+      ? buildMatchSnapshot({ history: await loadFinishedHistory(new Date()), match: row.match, now: new Date() })
+      : null;
   res.json(
     GetMatchDetailResponse.parse({
+      model,
       match: {
         fixtureId: fixtureKey(row.match),
         league: row.match.leagueCode,
