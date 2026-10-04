@@ -33,6 +33,7 @@ import {
   type OddsPapiQuota,
   type TournamentRef,
 } from "./oddspapi";
+import { describeError } from "../lib/error-detail";
 import { importFootballData } from "./football-data";
 import { refreshModelPredictions } from "./value-model";
 
@@ -196,7 +197,9 @@ function shortError(error: unknown, provider?: ProviderName): string {
   if (error instanceof Error && /timeout|timed out|aborted/i.test(error.name + error.message)) {
     return `La consulta a ${provider === "oddspapi" ? "OddsPapi" : "API-Football"} agotó el tiempo de espera.`;
   }
-  return `No se pudo conectar con ${provider === "oddspapi" ? "OddsPapi" : "API-Football"}. Revisa la conectividad y el estado del proveedor.`;
+  const name = provider === "oddspapi" ? "OddsPapi" : "API-Football";
+  const detail = describeError(error, [process.env.API_FOOTBALL_KEY, process.env.ODDSPAPI_API_KEY]);
+  return `No se pudo conectar con ${name}${detail ? ` (${detail})` : ""}. Revisa la conectividad y el estado del proveedor.`;
 }
 
 function apiFootballError(error: unknown): { message: string; statusCode?: number } {
@@ -768,7 +771,10 @@ async function runProviderTask(
       state: message.includes("no está configurado") ? "unconfigured" : "error",
       message,
     });
-    logger.warn({ provider, operation: name }, "Data provider task failed");
+    logger.warn(
+      { provider, operation: name, detail: describeError(error, [process.env.API_FOOTBALL_KEY, process.env.ODDSPAPI_API_KEY]) },
+      "Data provider task failed",
+    );
   }
 }
 
