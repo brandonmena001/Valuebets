@@ -14,4 +14,11 @@ describe("describeError", () => {
   it("devuelve vacío si no es un Error", () => {
     assert.equal(describeError("texto"), "");
   });
+  it("en errores de consulta muestra la causa de Postgres y no el SQL", () => {
+    const pg = Object.assign(new Error('null value in column "selection" violates not-null constraint'), { code: "23502", column: "selection" });
+    const error = new Error('Failed query: insert into "odds_quotes" ("id", "match_id") values ($1, $2) params: 1,2', { cause: pg });
+    const text = describeError(error);
+    assert.ok(text.includes("23502") && text.includes("not-null") && text.includes("columna selection"), text);
+    assert.ok(!text.includes("insert into"), text);
+  });
 });

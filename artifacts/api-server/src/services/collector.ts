@@ -521,33 +521,54 @@ function quoteFingerprint(
     .digest("hex");
 }
 
-async function persistOddsEvent(event: NormalizedOddsEvent): Promise<number> {
+/** Postgres rechaza el carácter NUL (0x00) en texto; los proveedores a veces lo envían. */
+function clean(value: string): string;
+function clean(value: string | null): string | null;
+function clean(value: string | null): string | null {
+  return value == null ? null : value.replace(/\u0000/g, "");
+}
+
+export async function persistOddsEvent(event: NormalizedOddsEvent): Promise<number> {
   const matchId = await saveOddsMatch(event);
+  let saved = 0;
+  let failed = 0;
+  let firstFailure = "";
+  // Una cuota defectuosa no debe tirar toda la sincronización: se omite, se cuenta y se registra.
   for (const quote of event.quotes) {
-    await db
-      .insert(oddsQuotesTable)
-      .values({
-        matchId,
-        provider: "oddspapi",
-        upstreamBookmakerId: quote.upstreamBookmakerId,
-        bookmaker: quote.bookmaker,
-        upstreamMarketId: quote.upstreamMarketId,
-        marketCategory: quote.marketCategory,
-        marketName: quote.marketName,
-        selection: quote.selection,
-        playerName: quote.playerName,
-        line: quote.line,
-        decimalOdds: quote.decimalOdds,
-        sourceUpdatedAt: quote.sourceUpdatedAt,
-        capturedAt: new Date(),
-        fingerprint: quoteFingerprint(matchId, event, quote),
-      })
-      .onConflictDoUpdate({
-        target: oddsQuotesTable.fingerprint,
-        set: { capturedAt: new Date(), decimalOdds: quote.decimalOdds },
-      });
+    try {
+      await db
+        .insert(oddsQuotesTable)
+        .values({
+          matchId,
+          provider: "oddspapi",
+          upstreamBookmakerId: clean(quote.upstreamBookmakerId),
+          bookmaker: clean(quote.bookmaker),
+          upstreamMarketId: clean(quote.upstreamMarketId),
+          marketCategory: quote.marketCategory,
+          marketName: clean(quote.marketName),
+          selection: clean(quote.selection),
+          playerName: clean(quote.playerName),
+          line: quote.line,
+          decimalOdds: quote.decimalOdds,
+          sourceUpdatedAt: quote.sourceUpdatedAt,
+          capturedAt: new Date(),
+          fingerprint: quoteFingerprint(matchId, event, quote),
+        })
+        .onConflictDoUpdate({
+          target: oddsQuotesTable.fingerprint,
+          set: { capturedAt: new Date(), decimalOdds: quote.decimalOdds },
+        });
+      saved += 1;
+    } catch (error) {
+      failed += 1;
+      if (!firstFailure) firstFailure = describeError(error);
+    }
   }
-  return event.quotes.length;
+  if (failed > 0) {
+    logger.warn({ matchId, saved, failed, firstFailure }, "Some odds quotes could not be saved");
+    if (saved === 0) throw new Error(`No se pudieron guardar las cuotas (${failed}). ${firstFailure}`);
+  }
+  return saved;
 }
 
 async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReferenceCache>> {
