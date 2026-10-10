@@ -3,8 +3,11 @@ import { describe, it } from "node:test";
 import { devigPower, negBinPmf, overProbability, poissonPmf, sum } from "./math";
 import { resolveName } from "./names";
 import { classifyQuote } from "./markets";
-import { buildPredictions, type HistoryMatch, type QuoteInput, type UpcomingMatch } from "./predict";
+import { buildMatchSnapshot, buildPredictions, type HistoryMatch, type QuoteInput, type UpcomingMatch } from "./predict";
 import { settleOutcome } from "./settle";
+import {
+  bttsProbability, effectiveProbability, lineOutcomeFromPmf, lineReturn, marginPmf, resultFor, splitLine,
+} from "./lines";
 import { parseCsv, parseFootballDataCsv, seasonCode, currentSeasonStartYear } from "../services/football-data-parse";
 import { expectedRates, fitRateModel, resultProbs, scoreMatrix, totalCountPmf, type Obs } from "./strength";
 
@@ -136,7 +139,10 @@ describe("distribuciones y mercado", () => {
     assert.ok(classifyQuote({ ...total, marketName: "Total Goals Over/Under" }, match));
     assert.equal(classifyQuote({ ...total, marketName: "Arsenal Team Total Goals" }, match), null);
     assert.equal(classifyQuote({ ...total, marketName: "1st Half Total Goals" }, match), null);
-    assert.equal(classifyQuote({ ...total, line: 2, marketName: "Total Goals" }, match), null);
+    // Las líneas enteras y de cuarto ahora sí se valoran (con push / medias ganancias).
+    assert.equal(classifyQuote({ ...total, line: 2, marketName: "Total Goals" }, match)?.line, 2);
+    assert.equal(classifyQuote({ ...total, line: 2.25, marketName: "Total Goals" }, match)?.line, 2.25);
+    assert.equal(classifyQuote({ ...total, line: 2.3, marketName: "Total Goals" }, match), null);
   });
 
   it("resuelve nombres de equipos con alias y rechaza ambigüedades", () => {
@@ -319,5 +325,280 @@ describe("importación de football-data.co.uk", () => {
     for (const [full, short] of expect) assert.equal(resolveName(full, known), short, `${full} -> ${short}`);
     assert.equal(resolveName("Real Madrid", known), "real madrid");
     assert.equal(resolveName("Equipo Desconocido", known), null);
+  });
+});
+
+describe("líneas enteras, de cuarto y hándicap asiático", () => {
+  it("reparte las líneas de cuarto en dos líneas vecinas", () => {
+    assert.deepEqual(splitLine(2.5), [2.5]);
+    assert.deepEqual(splitLine(2), [2]);
+    assert.deepEqual(splitLine(2.25), [2, 2.5]);
+    assert.deepEqual(splitLine(-0.75), [-1, -0.5]);
+  });
+
+  it("resultado de totales: push, media ganancia y media pérdida", () => {
+    assert.equal(resultFor(2, 2, 1), "push");
+    assert.equal(resultFor(3, 2, 1), "win");
+    assert.equal(resultFor(1, 2, -1), "win");
+    assert.equal(resultFor(2, 2.25, 1), "half-loss"); // más de 2.25 con 2 goles
+    assert.equal(resultFor(3, 2.25, 1), "win");
+    assert.equal(resultFor(2, 2.25, -1), "half-win");
+    assert.equal(resultFor(3, 2.75, 1), "half-win"); // más de 2.75 con 3 goles
+    assert.equal(resultFor(3, 2.75, -1), "half-loss");
+    assert.equal(resultFor(2, 2.75, 1), "loss");
+  });
+
+  it("hándicap asiático al local (umbral = -línea)", () => {
+    const home = (margin: number, line: number) => resultFor(margin, -line, 1);
+    const away = (margin: number, line: number) => resultFor(margin, -line, -1);
+    assert.equal(home(1, -0.5), "win");
+    assert.equal(home(0, -0.5), "loss");
+    assert.equal(home(1, -1), "push");
+    assert.equal(home(2, -1), "win");
+    assert.equal(home(0, -0.25), "half-loss");
+    assert.equal(home(1, -0.25), "win");
+    assert.equal(home(0, 0), "push");
+    assert.equal(home(-1, 0.75), "half-loss"); // +0.75 perdiendo por 1
+    assert.equal(home(0, 0.75), "win");
+    assert.equal(home(1, -0.75), "half-win"); // -0.75 ganando por 1
+    assert.equal(away(-1, -0.5), "win"); // visitante con +0.5 y gana por 1
+    assert.equal(away(0, -0.5), "win");
+    assert.equal(away(1, -0.5), "loss");
+  });
+
+  it("ganancia neta por resultado", () => {
+    assert.ok(Math.abs(lineReturn("win", 2.1) - 1.1) < 1e-12);
+    assert.ok(Math.abs(lineReturn("half-win", 2.1) - 0.55) < 1e-12);
+    assert.equal(lineReturn("push", 2.1), 0);
+    assert.equal(lineReturn("half-loss", 2.1), -0.5);
+    assert.equal(lineReturn("loss", 2.1), -1);
+  });
+
+  const lh = 1.6;
+  const la = 1.1;
+  const matrix = scoreMatrix(lh, la, 0);
+
+  it("sin push, la probabilidad efectiva coincide con la de la línea .5", () => {
+    const pmf = totalCountPmf(lh, la, 0);
+    const eff = effectiveProbability(lineOutcomeFromPmf(pmf, 0, 2.5, 1));
+    assert.ok(Math.abs(eff.prob - overProbability(pmf, 2.5)) < 1e-9);
+    assert.ok(Math.abs(eff.risk - 1) < 1e-9);
+  });
+
+  it("el hándicap de local y visitante son complementarios y el EV es consistente", () => {
+    const { pmf, offset } = marginPmf(matrix);
+    assert.ok(Math.abs(sum(pmf) - 1) < 1e-9);
+    for (const line of [-1.25, -1, -0.75, -0.25, 0, 0.5, 1]) {
+      const h = effectiveProbability(lineOutcomeFromPmf(pmf, offset, -line, 1));
+      const a = effectiveProbability(lineOutcomeFromPmf(pmf, offset, -line, -1));
+      assert.ok(Math.abs(h.prob + a.prob - 1) < 1e-9, `línea ${line}`);
+      assert.ok(Math.abs(h.risk - a.risk) < 1e-9, `riesgo línea ${line}`);
+      // EV por simulación exacta sobre la distribución == risk * (prob * cuota - 1)
+      const odds = 2.2;
+      let ev = 0;
+      for (let k = 0; k < pmf.length; k += 1) ev += pmf[k]! * lineReturn(resultFor(k + offset, -line, 1), odds);
+      assert.ok(Math.abs(ev - h.risk * (h.prob * odds - 1)) < 1e-9, `EV línea ${line}`);
+    }
+    // En una línea entera hay push: riesgo < 1.
+    const draw = effectiveProbability(lineOutcomeFromPmf(pmf, offset, 0, 1));
+    assert.ok(draw.risk < 0.9);
+  });
+
+  it("ambos anotan coincide con el cálculo independiente (rho = 0)", () => {
+    const expected = (1 - Math.exp(-lh)) * (1 - Math.exp(-la));
+    assert.ok(Math.abs(bttsProbability(matrix) - expected) < 1e-6);
+  });
+
+  it("clasifica ambos anotan y hándicap asiático, y descarta lo ambiguo", () => {
+    const match = { homeTeam: "Arsenal", awayTeam: "Chelsea" };
+    const base = { playerName: null, line: null, upstreamMarketId: null, marketCategory: "goals" };
+    assert.equal(classifyQuote({ ...base, marketName: "Both Teams To Score", selection: "Yes" }, match)?.selectionKey, "yes");
+    assert.equal(classifyQuote({ ...base, marketName: "Both Teams to Score", selection: "No" }, match)?.selectionKey, "no");
+    assert.equal(classifyQuote({ ...base, marketName: "1st Half Both Teams To Score", selection: "Yes" }, match), null);
+    assert.equal(classifyQuote({ ...base, marketName: "Both Teams To Score & Over 2.5", selection: "Yes" }, match), null);
+    const ah = { ...base, marketName: "Asian Handicap", line: -0.75 };
+    const home = classifyQuote({ ...ah, selection: "Arsenal" }, match)!;
+    assert.equal(home.kind, "handicap");
+    assert.equal(home.selectionKey, "home");
+    assert.equal(classifyQuote({ ...ah, selection: "Chelsea" }, match)?.selectionKey, "away");
+    assert.equal(classifyQuote({ ...ah, selection: "Draw" }, match), null);
+    assert.equal(classifyQuote({ ...ah, selection: "Arsenal", line: null }, match), null);
+    assert.equal(classifyQuote({ ...ah, selection: "Arsenal", line: -0.6 }, match), null);
+    assert.equal(classifyQuote({ ...ah, marketName: "European Handicap", selection: "Arsenal" }, match), null);
+    assert.equal(classifyQuote({ ...ah, marketName: "Asian Handicap Corners", selection: "Arsenal" }, match), null);
+    assert.equal(classifyQuote({ ...ah, marketName: "1st Half Asian Handicap", selection: "Arsenal" }, match), null);
+  });
+
+  it("liquida ambos anotan, hándicap y líneas enteras (push y medias)", () => {
+    const base = { playerName: null, stats: null, playerShots: null };
+    const at = (homeScore: number, awayScore: number) => ({ ...base, homeScore, awayScore });
+    assert.equal(settleOutcome({ ...at(2, 1), marketCategory: "goals", selectionKey: "yes", line: null }), "win");
+    assert.equal(settleOutcome({ ...at(2, 0), marketCategory: "goals", selectionKey: "yes", line: null }), "loss");
+    assert.equal(settleOutcome({ ...at(0, 0), marketCategory: "goals", selectionKey: "no", line: null }), "win");
+    assert.equal(settleOutcome({ ...at(2, 0), marketCategory: "match-result", selectionKey: "home", line: -2 }), "push");
+    assert.equal(settleOutcome({ ...at(2, 0), marketCategory: "match-result", selectionKey: "home", line: -1.75 }), "half-win");
+    assert.equal(settleOutcome({ ...at(1, 1), marketCategory: "goals", selectionKey: "away", line: 0 }), "push");
+    assert.equal(settleOutcome({ ...at(1, 1), marketCategory: "goals", selectionKey: "away", line: -0.25 }), "half-win");
+    assert.equal(settleOutcome({ ...at(1, 1), marketCategory: "goals", selectionKey: "over", line: 2 }), "push");
+    assert.equal(settleOutcome({ ...at(2, 1), marketCategory: "goals", selectionKey: "over", line: 3 }), "push");
+    assert.equal(settleOutcome({ ...at(2, 1), marketCategory: "goals", selectionKey: "under", line: 3.25 }), "half-win");
+    assert.equal(settleOutcome({ ...at(2, 1), marketCategory: "goals", selectionKey: "over", line: 2.75 }), "half-win");
+    // El 1X2 sigue igual (sin línea).
+    assert.equal(settleOutcome({ ...at(2, 1), marketCategory: "match-result", selectionKey: "home", line: null }), "win");
+  });
+});
+
+describe("mercados nuevos de extremo a extremo (datos simulados)", () => {
+  const BOOKS = ["b1", "b2", "b3", "b4", "b5", "b6"];
+  const L = league(21);
+  const upcoming: UpcomingMatch[] = [];
+  for (let i = 0; i < 30; i += 1) {
+    const h = (i * 3) % 20;
+    const a = (h + 1 + (i % 17)) % 20;
+    upcoming.push({
+      id: 20_000 + i, leagueCode: "premier-league", homeTeam: L.names[h]!, awayTeam: L.names[a]!,
+      kickoff: new Date(NOW.getTime() + (2 + i) * 3_600_000),
+    });
+  }
+  const matrixOf = (m: UpcomingMatch) => {
+    const r = L.rates(L.names.indexOf(m.homeTeam), L.names.indexOf(m.awayTeam));
+    return scoreMatrix(r.lh, r.la, 0);
+  };
+  let id = 1;
+  /** Cuotas a dos vías con margen y un impulso opcional en una casa y selección. */
+  function twoWay(m: UpcomingMatch, name: string, labels: [string, string], line: number | null, p: number, boost?: number): QuoteInput[] {
+    const out: QuoteInput[] = [];
+    for (const book of BOOKS) {
+      [p, 1 - p].forEach((prob, k) => {
+        let odds = 1 / (prob * 1.02);
+        if (book === "b3" && k === 0 && boost) odds *= boost;
+        out.push({
+          id: id++, matchId: m.id, bookmaker: book, upstreamMarketId: "mx", marketCategory: "goals", marketName: name,
+          selection: labels[k]!, playerName: null, line, decimalOdds: odds,
+          capturedAt: new Date(NOW.getTime() - 3_600_000), sourceUpdatedAt: null,
+        });
+      });
+    }
+    return out;
+  }
+  const run = (quotes: QuoteInput[]) =>
+    buildPredictions({ history: L.history, playerGames: [], matches: upcoming, quotes, now: NOW });
+
+  it("ambos anotan: con precios justos casi no recomienda; con una casa alta sí", () => {
+    const fair = upcoming.flatMap((m) => twoWay(m, "Both Teams To Score", ["Yes", "No"], null, bttsProbability(matrixOf(m))));
+    assert.ok(run(fair).length <= 2);
+    const boosted = upcoming.flatMap((m) => twoWay(m, "Both Teams To Score", ["Yes", "No"], null, bttsProbability(matrixOf(m)), 1.1));
+    const out = run(boosted);
+    assert.ok(out.length > 0);
+    for (const bet of out) {
+      assert.equal(bet.bookmaker, "b3");
+      assert.equal(bet.selectionKey, "yes");
+      assert.ok(bet.expectedValuePct >= 4 && bet.expectedValuePct <= 20);
+    }
+  });
+
+  it("hándicap asiático -0.5 y línea entera: recomienda y reduce el EV por el push", () => {
+    const peff = (m: UpcomingMatch, line: number) => {
+      const { pmf, offset } = marginPmf(matrixOf(m));
+      return effectiveProbability(lineOutcomeFromPmf(pmf, offset, -line, 1)).prob;
+    };
+    const quotesFor = (line: number) =>
+      upcoming.flatMap((m) => twoWay(m, "Asian Handicap", [m.homeTeam, m.awayTeam], line, peff(m, line), 1.1));
+    const half = run(quotesFor(-0.5));
+    assert.ok(half.length > 0);
+    for (const bet of half) {
+      assert.equal(bet.selectionKey, "home");
+      assert.equal(bet.line, -0.5);
+      assert.ok(bet.expectedValuePct >= 4 && bet.expectedValuePct <= 20);
+    }
+    const whole = run(quotesFor(0));
+    for (const bet of whole) {
+      // Con push posible, el EV real es menor que prob * cuota - 1 (solo parte de la apuesta está en juego).
+      const naive = (bet.modelProbability * bet.decimalOdds - 1) * 100;
+      assert.ok(bet.expectedValuePct < naive, `ev=${bet.expectedValuePct} naive=${naive}`);
+      assert.ok(bet.expectedValuePct > 0.5 * naive);
+    }
+  });
+
+  it("totales con línea entera y de cuarto se valoran y respetan los topes", () => {
+    const peff = (m: UpcomingMatch, line: number) => {
+      const pmf = totalCountPmf(...(() => {
+        const r = L.rates(L.names.indexOf(m.homeTeam), L.names.indexOf(m.awayTeam));
+        return [r.lh, r.la, 0] as const;
+      })());
+      return effectiveProbability(lineOutcomeFromPmf(pmf, 0, line, 1)).prob;
+    };
+    for (const line of [2, 2.25, 2.75, 3]) {
+      const quotes = upcoming.flatMap((m) =>
+        twoWay(m, "Total Goals", ["Over", "Under"], line, peff(m, line), 1.1));
+      for (const bet of run(quotes)) {
+        assert.equal(bet.line, line);
+        assert.ok(bet.expectedValuePct >= 4 && bet.expectedValuePct <= 20);
+        assert.ok(bet.kellyFraction > 0 && bet.kellyFraction <= 0.02);
+      }
+    }
+  });
+});
+
+describe("ficha de partido con mezcla de mercado", () => {
+  const L = league(33);
+  const match = { id: 30_001, leagueCode: "premier-league", homeTeam: L.names[2]!, awayTeam: L.names[9]! };
+  const r = L.rates(2, 9);
+  const m = scoreMatrix(r.lh, r.la, 0);
+  const truth = resultProbs(m);
+  let qid = 1;
+  const quote = (book: string, name: string, selection: string, odds: number, line: number | null, category = "goals"): QuoteInput => ({
+    id: qid++, matchId: match.id, bookmaker: book, upstreamMarketId: name, marketCategory: category, marketName: name,
+    selection, playerName: null, line, decimalOdds: odds, capturedAt: new Date(NOW.getTime() - 3_600_000), sourceUpdatedAt: null,
+  });
+  const books = (n: number) => ["b1", "b2", "b3", "b4", "b5", "b6"].slice(0, n);
+  const quotesFor = (n: number): QuoteInput[] =>
+    books(n).flatMap((b) => [
+      quote(b, "Full Time Result", "1", 1 / (truth.home * 1.04), null, "match-result"),
+      quote(b, "Full Time Result", "X", 1 / (truth.draw * 1.04), null, "match-result"),
+      quote(b, "Full Time Result", "2", 1 / (truth.away * 1.04), null, "match-result"),
+      quote(b, "Both Teams To Score", "Yes", 1 / (0.62 * 1.04), null),
+      quote(b, "Both Teams To Score", "No", 1 / (0.38 * 1.04), null),
+      quote(b, "Total Goals", "Over 2.5", 1 / (0.52 * 1.04), 2.5),
+      quote(b, "Total Goals", "Under 2.5", 1 / (0.48 * 1.04), 2.5),
+    ]);
+
+  it("sin cuotas devuelve solo el modelo puro (blended = null)", () => {
+    const snap = buildMatchSnapshot({ history: L.history, match, now: NOW })!;
+    assert.ok(snap);
+    assert.equal(snap.blended, null);
+  });
+
+  it("con consenso mezcla modelo y mercado con el peso del 1X2", () => {
+    const pure = buildMatchSnapshot({ history: L.history, match, now: NOW })!;
+    const snap = buildMatchSnapshot({ history: L.history, match, now: NOW, quotes: quotesFor(6) })!;
+    const b = snap.blended!;
+    assert.ok(b.result);
+    assert.deepEqual(snap.result, pure.result); // el modelo puro no cambia
+    const p = b.result!.probs;
+    assert.ok(Math.abs(p.home + p.draw + p.away - 1) < 1e-9);
+    assert.equal(b.result!.bookmakers, 6);
+    assert.ok(b.result!.modelWeight > 0 && b.result!.modelWeight <= 0.35);
+    for (const k of ["home", "draw", "away"] as const) {
+      const lo = Math.min(pure.result[k], b.result!.market[k]);
+      const hi = Math.max(pure.result[k], b.result!.market[k]);
+      assert.ok(p[k] >= lo - 1e-9 && p[k] <= hi + 1e-9, `${k} fuera del intervalo modelo-mercado`);
+    }
+    const fairBtts = devigPower([1 / (0.62 * 1.04), 1 / (0.38 * 1.04)])![0]!; // el margen se quita con el método de potencia
+    assert.ok(b.btts && Math.abs(b.btts.marketYes - fairBtts) < 1e-9);
+    const over25 = b.goalLines.find((x) => x.line === 2.5)!;
+    assert.ok(Math.abs(over25.marketOver - devigPower([1 / (0.52 * 1.04), 1 / (0.48 * 1.04)])![0]!) < 1e-9);
+  });
+
+  it("con menos casas que el mínimo no mezcla", () => {
+    const snap = buildMatchSnapshot({ history: L.history, match, now: NOW, quotes: quotesFor(2) })!;
+    assert.equal(snap.blended, null);
+  });
+
+  it("ignora cuotas de otros partidos y las desactualizadas", () => {
+    const other = quotesFor(6).map((q) => ({ ...q, matchId: 99 }));
+    assert.equal(buildMatchSnapshot({ history: L.history, match, now: NOW, quotes: other })!.blended, null);
+    const stale = quotesFor(6).map((q) => ({ ...q, capturedAt: new Date(NOW.getTime() - 30 * 3_600_000) }));
+    assert.equal(buildMatchSnapshot({ history: L.history, match, now: NOW, quotes: stale })!.blended, null);
   });
 });

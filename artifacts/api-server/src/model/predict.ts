@@ -1,4 +1,5 @@
 import { ESS_HALF_WEIGHT, MODEL_VERSION, maxModelWeight, modelConfig } from "./config";
+import { bttsProbability, effectiveProbability, lineOutcomeFromPmf, marginPmf } from "./lines";
 import { clamp, devigPower, median, negBinPmf, overProbability, sum } from "./math";
 import { classifyQuote, expectedKeys, type ClassifiedQuote, type SelectionKey, type StatKey } from "./markets";
 import { normalizeName, resolveName } from "./names";
@@ -109,24 +110,31 @@ type LeagueModel = { model: RateModel; teams: string[] };
 type MatchDistribution = {
   ess: Partial<Record<StatKey, number>>;
   result?: { home: number; draw: number; away: number };
+  /** Matriz de marcadores (solo goles): base de "ambos anotan" y del hándicap asiático. */
+  matrix?: number[][];
   total: Record<StatKey, number[] | undefined>;
 };
 
 type PlayerModel = { pmf: number[]; sampleSize: number };
+
+export type FitOverrides = { halfLifeDays?: number; priorGames?: number };
 
 export function fitLeagueModel(
   history: HistoryMatch[],
   league: string,
   stat: StatKey,
   now: Date,
+  overrides: FitOverrides = {},
 ): LeagueModel | null {
   const cfg = modelConfig;
+  const halfLifeDays = overrides.halfLifeDays ?? cfg.halfLifeDays;
+  const priorGames = overrides.priorGames ?? cfg.priorGames;
   const obs: Obs[] = [];
   for (const row of history) {
     if (row.leagueCode !== league || row.kickoff >= now) continue;
     const values = statValues(row, stat);
     if (!values) continue;
-    const w = decay(now, row.kickoff, cfg.halfLifeDays);
+    const w = decay(now, row.kickoff, halfLifeDays);
     if (w < 1e-3) continue;
     obs.push({
       home: normalizeName(row.homeTeam),
@@ -138,12 +146,24 @@ export function fitLeagueModel(
   }
   const fitted =
     obs.length >= cfg.minLeagueMatches
-      ? fitRateModel(obs, cfg.priorGames, { goals: stat === "goals" })
+      ? fitRateModel(obs, priorGames, { goals: stat === "goals" })
       : null;
   return fitted ? { model: fitted, teams: [...fitted.att.keys()] } : null;
 }
 
 export type LineProbability = { line: number; over: number };
+/** Probabilidades ya mezcladas con el consenso del mercado (misma fórmula que las value bets). */
+export type BlendedSnapshot = {
+  result: {
+    probs: { home: number; draw: number; away: number };
+    market: { home: number; draw: number; away: number };
+    modelWeight: number;
+    bookmakers: number;
+  } | null;
+  btts: { yes: number; marketYes: number; modelWeight: number; bookmakers: number } | null;
+  goalLines: Array<{ line: number; over: number; marketOver: number; modelWeight: number; bookmakers: number }>;
+};
+
 export type MatchSnapshot = {
   modelVersion: string;
   expectedGoals: { home: number; away: number };
@@ -159,6 +179,8 @@ export type MatchSnapshot = {
     lines: LineProbability[];
   }>;
   dataQuality: { score: number; level: "low" | "medium" | "high"; homeSample: number; awaySample: number };
+  /** null si no se pasaron cuotas o ninguna tiene consenso suficiente. Los campos de arriba son del modelo puro. */
+  blended: BlendedSnapshot | null;
 };
 
 function linesAround(mean: number, pmf: number[], count: number): LineProbability[] {
@@ -169,14 +191,134 @@ function linesAround(mean: number, pmf: number[], count: number): LineProbabilit
   });
 }
 
+type Entry = { quote: QuoteInput; c: ClassifiedQuote };
+
+/** Solo la cuota más reciente de cada casa y selección. */
+function latestEntries(matchQuotes: QuoteInput[], match: { homeTeam: string; awayTeam: string }): Entry[] {
+  const latest = new Map<string, Entry>();
+  for (const quote of matchQuotes) {
+    const c = classifyQuote(quote, match);
+    if (!c) continue;
+    const key = `${quote.bookmaker}|${c.marketKey}|${c.selectionKey}`;
+    const current = latest.get(key);
+    const newer =
+      !current ||
+      quote.capturedAt > current.quote.capturedAt ||
+      (quote.capturedAt.getTime() === current.quote.capturedAt.getTime() &&
+        (quote.sourceUpdatedAt?.getTime() ?? 0) > (current.quote.sourceUpdatedAt?.getTime() ?? 0));
+    if (newer) latest.set(key, { quote, c });
+  }
+  return [...latest.values()];
+}
+
+/** Quita el margen por casa y mercado; devuelve las probabilidades justas de cada casa por mercado. */
+function consensusSamplesOf(entries: Entry[]): Map<string, Map<SelectionKey, number[]>> {
+  const bookGroups = new Map<string, Entry[]>();
+  for (const entry of entries) {
+    const key = `${entry.quote.bookmaker}|${entry.c.marketKey}`;
+    const list = bookGroups.get(key);
+    if (list) list.push(entry);
+    else bookGroups.set(key, [entry]);
+  }
+  const consensusSamples = new Map<string, Map<SelectionKey, number[]>>();
+  for (const group of bookGroups.values()) {
+    const kind = group[0]!.c.kind;
+    const keys = expectedKeys(kind);
+    const bySelection = new Map(group.map((e) => [e.c.selectionKey, e.quote.decimalOdds]));
+    if (!keys.every((k) => bySelection.has(k))) continue;
+    const fair = devigPower(keys.map((k) => bySelection.get(k)!));
+    if (!fair) continue;
+    const consensusKey = group[0]!.c.consensusKey;
+    const store = consensusSamples.get(consensusKey) ?? new Map<SelectionKey, number[]>();
+    keys.forEach((k, i) => store.set(k, [...(store.get(k) ?? []), fair[i]!]));
+    consensusSamples.set(consensusKey, store);
+  }
+  return consensusSamples;
+}
+
+/** Consenso (mediana entre casas, renormalizado) de una selección; null si hay pocas casas. */
+function consensusOf(
+  samples: Map<SelectionKey, number[]> | undefined,
+  kind: ClassifiedQuote["kind"],
+  selectionKey: SelectionKey,
+  minBooks: number,
+): { prob: number; books: number } | null {
+  const keys = expectedKeys(kind);
+  if (!samples || keys.some((k) => (samples.get(k)?.length ?? 0) < minBooks)) return null;
+  const medians = keys.map((k) => median(samples.get(k)!));
+  const norm = sum(medians);
+  return {
+    prob: medians[keys.indexOf(selectionKey)]! / norm,
+    books: Math.min(...keys.map((k) => samples.get(k)!.length)),
+  };
+}
+
+function blendSnapshotWithMarket(args: {
+  quotes: QuoteInput[];
+  match: { id?: number; homeTeam: string; awayTeam: string };
+  now: Date;
+  ess: number;
+  result: { home: number; draw: number; away: number };
+  btts: number;
+  goalsPmf: number[];
+}): BlendedSnapshot | null {
+  const cfg = modelConfig;
+  const { match, now, ess } = args;
+  const fresh = args.quotes.filter(
+    (q) => (match.id === undefined || q.matchId === match.id) && now.getTime() - q.capturedAt.getTime() <= cfg.maxOddsAgeMs,
+  );
+  if (!fresh.length) return null;
+  const samples = consensusSamplesOf(latestEntries(fresh, match));
+  const weightOf = (key: keyof typeof maxModelWeight) => maxModelWeight[key] * (ess / (ess + ESS_HALF_WEIGHT));
+
+  let result: BlendedSnapshot["result"] = null;
+  const home = consensusOf(samples.get("result"), "result", "home", cfg.minBookmakers);
+  const draw = consensusOf(samples.get("result"), "result", "draw", cfg.minBookmakers);
+  const away = consensusOf(samples.get("result"), "result", "away", cfg.minBookmakers);
+  if (home && draw && away) {
+    const w = weightOf("match-result");
+    const mix = (raw: number, market: number) => w * raw + (1 - w) * market;
+    result = {
+      probs: { home: mix(args.result.home, home.prob), draw: mix(args.result.draw, draw.prob), away: mix(args.result.away, away.prob) },
+      market: { home: home.prob, draw: draw.prob, away: away.prob },
+      modelWeight: w,
+      bookmakers: Math.min(home.books, draw.books, away.books),
+    };
+  }
+
+  let btts: BlendedSnapshot["btts"] = null;
+  const bttsMarket = consensusOf(samples.get("btts"), "btts", "yes", cfg.minBookmakers);
+  if (bttsMarket) {
+    const w = weightOf("goals");
+    btts = { yes: w * args.btts + (1 - w) * bttsMarket.prob, marketYes: bttsMarket.prob, modelWeight: w, bookmakers: bttsMarket.books };
+  }
+
+  const goalLines: BlendedSnapshot["goalLines"] = [];
+  for (const line of [0.5, 1.5, 2.5, 3.5, 4.5]) {
+    const market = consensusOf(samples.get(`total|goals|${line}`), "total", "over", cfg.minBookmakers);
+    if (!market) continue;
+    const w = weightOf("goals");
+    goalLines.push({
+      line,
+      over: w * overProbability(args.goalsPmf, line) + (1 - w) * market.prob,
+      marketOver: market.prob,
+      modelWeight: w,
+      bookmakers: market.books,
+    });
+  }
+  return result || btts || goalLines.length ? { result, btts, goalLines } : null;
+}
+
 /**
  * Lectura del modelo puro para una ficha de partido (sin mezclar con el mercado).
  * Devuelve null si faltan datos suficientes de alguno de los equipos.
  */
 export function buildMatchSnapshot(input: {
   history: HistoryMatch[];
-  match: { leagueCode: string; homeTeam: string; awayTeam: string };
+  match: { id?: number; leagueCode: string; homeTeam: string; awayTeam: string };
   now: Date;
+  /** Cuotas del partido (opcional). Con consenso suficiente se devuelve `blended`. */
+  quotes?: QuoteInput[];
 }): MatchSnapshot | null {
   const { history, match, now } = input;
   const goals = fitLeagueModel(history, match.leagueCode, "goals", now);
@@ -232,6 +374,11 @@ export function buildMatchSnapshot(input: {
       homeSample: goals.model.ess.get(home) ?? 0,
       awaySample: goals.model.ess.get(away) ?? 0,
     },
+    blended: input.quotes?.length
+      ? blendSnapshotWithMarket({
+          quotes: input.quotes, match, now, ess: rates.ess, result: resultProbs(matrix), btts, goalsPmf,
+        })
+      : null,
   };
 }
 
@@ -273,6 +420,7 @@ export function buildPredictions(input: {
       if (stat === "goals") {
         const matrix = scoreMatrix(rates.lh, rates.la, lm.model.rho);
         dist.result = resultProbs(matrix);
+        dist.matrix = matrix;
         dist.total.goals = totalGoalsPmf(matrix);
       } else {
         dist.total[stat] = totalCountPmf(rates.lh, rates.la, lm.model.alpha);
@@ -394,45 +542,11 @@ export function buildPredictions(input: {
     const matchQuotes = quotesByMatch.get(match.id);
     if (!matchQuotes?.length) continue;
 
-    type Entry = { quote: QuoteInput; c: ClassifiedQuote };
-    // Solo la cuota más reciente de cada casa y selección.
-    const latest = new Map<string, Entry>();
-    for (const quote of matchQuotes) {
-      const c = classifyQuote(quote, match);
-      if (!c) continue;
-      const key = `${quote.bookmaker}|${c.marketKey}|${c.selectionKey}`;
-      const current = latest.get(key);
-      const newer =
-        !current ||
-        quote.capturedAt > current.quote.capturedAt ||
-        (quote.capturedAt.getTime() === current.quote.capturedAt.getTime() &&
-          (quote.sourceUpdatedAt?.getTime() ?? 0) > (current.quote.sourceUpdatedAt?.getTime() ?? 0));
-      if (newer) latest.set(key, { quote, c });
-    }
-    const entries = [...latest.values()];
+    const entries = latestEntries(matchQuotes, match);
     if (!entries.length) continue;
 
     // Quitar margen por casa y mercado -> consenso (mediana) entre casas.
-    const bookGroups = new Map<string, Entry[]>();
-    for (const entry of entries) {
-      const key = `${entry.quote.bookmaker}|${entry.c.marketKey}`;
-      const list = bookGroups.get(key);
-      if (list) list.push(entry);
-      else bookGroups.set(key, [entry]);
-    }
-    const consensusSamples = new Map<string, Map<SelectionKey, number[]>>();
-    for (const group of bookGroups.values()) {
-      const kind = group[0]!.c.kind;
-      const keys = expectedKeys(kind);
-      const bySelection = new Map(group.map((e) => [e.c.selectionKey, e.quote.decimalOdds]));
-      if (!keys.every((k) => bySelection.has(k))) continue;
-      const fair = devigPower(keys.map((k) => bySelection.get(k)!));
-      if (!fair) continue;
-      const consensusKey = group[0]!.c.consensusKey;
-      const store = consensusSamples.get(consensusKey) ?? new Map<SelectionKey, number[]>();
-      keys.forEach((k, i) => store.set(k, [...(store.get(k) ?? []), fair[i]!]));
-      consensusSamples.set(consensusKey, store);
-    }
+    const consensusSamples = consensusSamplesOf(entries);
 
     // Mejor precio por selección entre todas las casas.
     const best = new Map<string, { entry: Entry; books: number }>();
@@ -454,36 +568,55 @@ export function buildPredictions(input: {
 
     for (const { entry, books } of best.values()) {
       const { quote, c } = entry;
-      const samples = consensusSamples.get(c.consensusKey);
-      const keys = expectedKeys(c.kind);
       const minBooks = c.kind === "player" ? cfg.minBookmakersProps : cfg.minBookmakers;
-      if (!samples || keys.some((k) => (samples.get(k)?.length ?? 0) < minBooks)) continue;
-      const medians = keys.map((k) => median(samples.get(k)!));
-      const norm = sum(medians);
-      const marketProb = medians[keys.indexOf(c.selectionKey)]! / norm;
-      const booksUsed = Math.min(...keys.map((k) => samples.get(k)!.length));
+      const consensus = consensusOf(consensusSamples.get(c.consensusKey), c.kind, c.selectionKey, minBooks);
+      if (!consensus) continue;
+      const marketProb = consensus.prob;
+      const booksUsed = consensus.books;
 
       // Probabilidad del modelo
       let raw: number | null = null;
       let ess = 0;
+      // Fracción de la apuesta "en juego" (1 salvo líneas enteras/de cuarto con push o medias).
+      let risk = 1;
       let weightKey: keyof typeof maxModelWeight;
       if (c.kind === "result") {
         if (!dist.result) continue;
         raw = dist.result[c.selectionKey as "home" | "draw" | "away"];
         ess = dist.ess.goals ?? 0;
         weightKey = "match-result";
+      } else if (c.kind === "btts") {
+        if (!dist.matrix) continue;
+        const yes = bttsProbability(dist.matrix);
+        raw = c.selectionKey === "yes" ? yes : 1 - yes;
+        ess = dist.ess.goals ?? 0;
+        // Sin evidencia propia todavía: mismo peso máximo que los totales de goles.
+        weightKey = "goals";
+      } else if (c.kind === "handicap") {
+        if (!dist.matrix || c.line == null) continue;
+        const margin = marginPmf(dist.matrix);
+        const eff = effectiveProbability(
+          lineOutcomeFromPmf(margin.pmf, margin.offset, -c.line, c.selectionKey === "home" ? 1 : -1),
+        );
+        raw = eff.prob;
+        risk = eff.risk;
+        ess = dist.ess.goals ?? 0;
+        // Sin evidencia propia todavía: mismo peso máximo que el 1X2 (misma matriz de goles).
+        weightKey = "match-result";
       } else if (c.kind === "total") {
         const pmf = dist.total[c.stat];
         if (!pmf || c.line == null) continue;
-        const over = overProbability(pmf, c.line);
-        raw = c.selectionKey === "over" ? over : 1 - over;
+        const eff = effectiveProbability(lineOutcomeFromPmf(pmf, 0, c.line, c.selectionKey === "over" ? 1 : -1));
+        raw = eff.prob;
+        risk = eff.risk;
         ess = dist.ess[c.stat] ?? 0;
         weightKey = c.stat === "goals" ? "goals" : c.stat === "corners" ? "corners" : c.stat === "cards" ? "cards" : "shots-on-target";
       } else {
         const model = quote.playerName ? playerModel(quote.playerName, match.kickoff) : null;
         if (!model || c.line == null) continue;
-        const over = overProbability(model.pmf, c.line);
-        raw = c.selectionKey === "over" ? over : 1 - over;
+        const eff = effectiveProbability(lineOutcomeFromPmf(model.pmf, 0, c.line, c.selectionKey === "over" ? 1 : -1));
+        raw = eff.prob;
+        risk = eff.risk;
         ess = model.sampleSize;
         weightKey = "player";
       }
@@ -495,8 +628,9 @@ export function buildPredictions(input: {
       const odds = quote.decimalOdds;
       const gap = Math.abs(raw - marketProb);
 
-      const evPct = (probability * odds - 1) * 100;
-      const marketEvPct = (marketProb * odds - 1) * 100;
+      // EV real por unidad apostada: con push/medias solo la fracción `risk` está en juego.
+      const evPct = risk * (probability * odds - 1) * 100;
+      const marketEvPct = risk * (marketProb * odds - 1) * 100;
       if (odds < cfg.minOdds || odds > cfg.maxOdds) continue;
       if (evPct < cfg.minEvPct || evPct > cfg.maxEvPct) continue;
       // Un precio muy por encima del consenso suele ser una cuota vieja o errónea, no valor.
