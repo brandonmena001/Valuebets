@@ -33,3 +33,13 @@ export function describeError(error: unknown, secrets: Array<string | undefined>
     .replace(/\s+/g, " ")
     .slice(0, 260);
 }
+
+/** Código SQLSTATE y restricción de un error de Drizzle/pg (en `cause` o en el propio error). */
+export function pgErrorInfo(error: unknown): { code?: string; constraint?: string } {
+  const source = (error as { cause?: unknown } | null)?.cause ?? error;
+  const pg = source as PgLike | null;
+  return {
+    code: typeof pg?.code === "string" ? pg.code : undefined,
+    constraint: typeof pg?.constraint === "string" ? pg.constraint : undefined,
+  };
+}

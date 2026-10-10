@@ -4,7 +4,9 @@ import { logger } from "../lib/logger";
 import {
   currentSeasonStartYear,
   parseFootballDataCsv,
+  parseFootballDataFixtures,
   seasonCode,
+  type ParsedFixture,
   type ParsedResult,
 } from "./football-data-parse";
 
@@ -74,4 +76,28 @@ export async function importFootballData(
   }
   logger.info({ rows: total, errors }, "football-data history import finished");
   return { rows: total, errors, skipped: false };
+}
+
+const DIV_TO_LEAGUE: Record<string, string> = { E0: "premier-league", SP1: "la-liga", D1: "bundesliga" };
+const FIXTURES_CACHE_MS = 3 * 60 * 60 * 1000;
+let fixturesCache: { loadedAt: number; fixtures: ParsedFixture[] } | null = null;
+
+/**
+ * Próximos partidos de las tres ligas desde fixtures.csv (gratuito, sin cuota). Solo se usa como
+ * calendario para decidir cuándo gastar llamadas de OddsPapi: no escribe en la base de datos.
+ * Nunca lanza; `ok: false` significa "calendario desconocido".
+ */
+export async function fetchUpcomingFixtures(): Promise<{ ok: boolean; fixtures: ParsedFixture[]; error?: string }> {
+  if (fixturesCache && Date.now() - fixturesCache.loadedAt < FIXTURES_CACHE_MS) {
+    return { ok: true, fixtures: fixturesCache.fixtures };
+  }
+  try {
+    const response = await fetch("https://www.football-data.co.uk/fixtures.csv", { signal: AbortSignal.timeout(25_000) });
+    if (!response.ok) return { ok: false, fixtures: [], error: `fixtures.csv: HTTP ${response.status}` };
+    const fixtures = parseFootballDataFixtures(await response.text(), DIV_TO_LEAGUE);
+    fixturesCache = { loadedAt: Date.now(), fixtures };
+    return { ok: true, fixtures };
+  } catch (error) {
+    return { ok: false, fixtures: [], error: `fixtures.csv: ${error instanceof Error ? error.message : "error desconocido"}` };
+  }
 }

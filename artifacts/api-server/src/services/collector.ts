@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { and, eq, gte, isNull, lte } from "drizzle-orm";
+import { and, eq, gte, inArray, isNull, lte, notInArray, sql } from "drizzle-orm";
 import {
   db,
   matchesTable,
   matchStatsTable,
   oddsQuotesTable,
+  historicalResultsTable,
   playerMatchStatsTable,
   providerTournamentsTable,
   sourceStatusTable,
@@ -33,8 +34,15 @@ import {
   type OddsPapiQuota,
   type TournamentRef,
 } from "./oddspapi";
-import { describeError } from "../lib/error-detail";
-import { importFootballData } from "./football-data";
+import { describeError, pgErrorInfo } from "../lib/error-detail";
+import { findUnmatchedTeams } from "../lib/team-coverage";
+import { fetchUpcomingFixtures, importFootballData } from "./football-data";
+import {
+  ODDS_FAR_HOURS,
+  planOddsFetch,
+  quotesDigest,
+  type CalendarMatch,
+} from "../lib/odds-plan";
 import { refreshModelPredictions } from "./value-model";
 
 export type SyncScope = "all" | "fixtures" | "odds" | "stats";
@@ -59,6 +67,11 @@ let lastFixtureRunAt = 0;
 let lastStatsRunAt = 0;
 let lastOddsRunAt = 0;
 let lastManualRunAt = 0;
+let lastOddsFetchAt = 0;
+let lastOddsDiscoveryAt = 0;
+const lastEventDigests = new Map<string, string>();
+type OddsCallKind = "reference" | "tournaments" | "odds";
+let oddsCalls: Record<OddsCallKind, number> = { reference: 0, tournaments: 0, odds: 0 };
 let nextScheduledAt = new Date(Date.now() + 15_000);
 let oddsReferenceCache:
   | {
@@ -233,10 +246,12 @@ async function callApiFootball<T>(
 
 async function callOddsPapi<T>(
   action: () => Promise<{ quota: OddsPapiQuota; [key: string]: unknown }>,
+  kind: OddsCallKind = "odds",
 ): Promise<T> {
   if (!(await reserveProviderRequest("oddspapi"))) {
     throw new Error("Se alcanzó el límite local de consultas de OddsPapi.");
   }
+  oddsCalls[kind] += 1;
   const result = await action();
   await storeQuota("oddspapi", result.quota);
   return result as T;
@@ -470,7 +485,7 @@ async function loadOrDiscoverTournaments(): Promise<{
   }
 
   try {
-    const result = await callOddsPapi(fetchFootballTournaments);
+    const result = await callOddsPapi(fetchFootballTournaments, "tournaments");
     const tournaments = (result as Awaited<ReturnType<typeof fetchFootballTournaments>>).tournaments;
     for (const tournament of tournaments) {
       await db
@@ -533,6 +548,7 @@ export async function persistOddsEvent(event: NormalizedOddsEvent): Promise<numb
   let saved = 0;
   let failed = 0;
   let firstFailure = "";
+  let playerCollisions = 0;
   // Una cuota defectuosa no debe tirar toda la sincronización: se omite, se cuenta y se registra.
   for (const quote of event.quotes) {
     try {
@@ -560,9 +576,40 @@ export async function persistOddsEvent(event: NormalizedOddsEvent): Promise<numb
         });
       saved += 1;
     } catch (error) {
+      const info = pgErrorInfo(error);
+      if (info.code === "23505" && info.constraint === "odds_quotes_match_source_market_idx") {
+        // Misma casa/mercado/selección/línea/hora con otra cuota: se actualiza la fila del mismo jugador.
+        // Si el hueco lo ocupa otro jugador, el índice (que no incluye player_name) impide guardarla.
+        try {
+          const same = (column: unknown, value: unknown) => sql`${column} is not distinct from ${value}`;
+          const updated = await db
+            .update(oddsQuotesTable)
+            .set({ decimalOdds: quote.decimalOdds, fingerprint: quoteFingerprint(matchId, event, quote), capturedAt: new Date() })
+            .where(
+              and(
+                eq(oddsQuotesTable.matchId, matchId),
+                eq(oddsQuotesTable.provider, "oddspapi"),
+                eq(oddsQuotesTable.bookmaker, clean(quote.bookmaker)),
+                same(oddsQuotesTable.upstreamMarketId, clean(quote.upstreamMarketId)),
+                eq(oddsQuotesTable.selection, clean(quote.selection)),
+                same(oddsQuotesTable.line, quote.line),
+                same(oddsQuotesTable.sourceUpdatedAt, quote.sourceUpdatedAt),
+                same(oddsQuotesTable.playerName, clean(quote.playerName)),
+              ),
+            )
+            .returning({ id: oddsQuotesTable.id });
+          if (updated.length > 0) { saved += 1; continue; }
+          playerCollisions += 1;
+        } catch {
+          // se cuenta como fallo abajo
+        }
+      }
       failed += 1;
       if (!firstFailure) firstFailure = describeError(error);
     }
+  }
+  if (playerCollisions > 0) {
+    logger.warn({ matchId, playerCollisions }, "Odds quotes dropped: another player holds the same unique slot (odds_quotes_match_source_market_idx lacks player_name)");
   }
   if (failed > 0) {
     logger.warn({ matchId, saved, failed, firstFailure }, "Some odds quotes could not be saved");
@@ -577,9 +624,9 @@ async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReference
     Date.now() - oddsReferenceCache.loadedAt < ODDSPAPI_REFERENCE_CACHE_MS
   ) return oddsReferenceCache;
 
-  const bookmakerResult = await callOddsPapi(fetchFootballBookmakers);
-  const participantResult = await callOddsPapi(fetchFootballParticipants);
-  const marketResult = await callOddsPapi(fetchFootballMarkets);
+  const bookmakerResult = await callOddsPapi(fetchFootballBookmakers, "reference");
+  const participantResult = await callOddsPapi(fetchFootballParticipants, "reference");
+  const marketResult = await callOddsPapi(fetchFootballMarkets, "reference");
   const bookmakers = (bookmakerResult as Awaited<ReturnType<typeof fetchFootballBookmakers>>).bookmakers;
   const participants = (participantResult as Awaited<ReturnType<typeof fetchFootballParticipants>>).participants;
   const markets = (marketResult as Awaited<ReturnType<typeof fetchFootballMarkets>>).markets;
@@ -595,7 +642,93 @@ async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReference
   return oddsReferenceCache;
 }
 
-async function syncOdds(): Promise<TaskResult> {
+async function loadOddsCalendar(now: Date): Promise<{ calendar: CalendarMatch[]; known: boolean; error?: string }> {
+  const calendar: CalendarMatch[] = [];
+  let known = false;
+  const upcoming = await fetchUpcomingFixtures();
+  if (upcoming.ok) {
+    known = true;
+    calendar.push(...upcoming.fixtures.map(({ leagueCode, kickoff }) => ({ leagueCode, kickoff })));
+  }
+  try {
+    const rows = await db
+      .select({ leagueCode: matchesTable.leagueCode, kickoff: matchesTable.kickoff })
+      .from(matchesTable)
+      .where(
+        and(
+          gte(matchesTable.kickoff, new Date(now.getTime() - 2 * 3_600_000)),
+          lte(matchesTable.kickoff, new Date(now.getTime() + ODDS_FAR_HOURS * 3_600_000)),
+          notInArray(matchesTable.status, ["finished", "cancelled"]),
+        ),
+      );
+    if (rows.length) known = true;
+    calendar.push(...rows);
+  } catch (error) {
+    return { calendar, known, error: describeError(error) };
+  }
+  return { calendar, known, error: upcoming.error };
+}
+
+/** Cuotas idénticas a las de la última sincronización: un solo UPDATE de capturedAt en vez de N inserts. */
+export async function refreshUnchangedEvent(event: NormalizedOddsEvent): Promise<number | null> {
+  const matchId = await saveOddsMatch(event);
+  const fingerprints = event.quotes.map((quote) => quoteFingerprint(matchId, event, quote));
+  if (!fingerprints.length) return 0;
+  let touched = 0;
+  for (let i = 0; i < fingerprints.length; i += 500) {
+    const updated = await db
+      .update(oddsQuotesTable)
+      .set({ capturedAt: new Date() })
+      .where(and(eq(oddsQuotesTable.matchId, matchId), inArray(oddsQuotesTable.fingerprint, fingerprints.slice(i, i + 500))))
+      .returning({ id: oddsQuotesTable.id });
+    touched += updated.length;
+  }
+  return touched >= fingerprints.length ? touched : null;
+}
+
+async function syncOdds(scheduled = true): Promise<TaskResult> {
+  oddsCalls = { reference: 0, tournaments: 0, odds: 0 };
+  const startedAt = new Date();
+  const calendarInfo = await loadOddsCalendar(startedAt);
+  const plan = planOddsFetch({
+    calendar: calendarInfo.calendar,
+    calendarKnown: calendarInfo.known,
+    allLeagues: apiFootballLeagues.map((item) => item.code),
+    now: startedAt,
+    lastFetchAt: lastOddsFetchAt,
+    lastDiscoveryAt: lastOddsDiscoveryAt,
+    scheduled,
+  });
+  if (!plan.fetch) {
+    logger.info(
+      { provider: "oddspapi", calls: 0, reason: plan.reason, calendarKnown: calendarInfo.known, calendarError: calendarInfo.error, near: plan.near, far: plan.far },
+      "OddsPapi sync skipped to save quota",
+    );
+    return { records: 0, errors: [], succeeded: false };
+  }
+  lastOddsFetchAt = Date.now();
+  if (!calendarInfo.known) lastOddsDiscoveryAt = Date.now();
+  const result = await syncOddsFetch(plan.leagues, startedAt);
+  const row = await sourceRecord("oddspapi");
+  logger.info(
+    {
+      provider: "oddspapi",
+      reason: plan.reason,
+      calls: oddsCalls.reference + oddsCalls.tournaments + oddsCalls.odds,
+      callsByKind: { ...oddsCalls },
+      monthUsed: row.requestsUsed,
+      monthCap: ODDSPAPI_LOCAL_MONTHLY_CAP,
+      leaguesRequested: plan.leagues,
+      leaguesSkipped: apiFootballLeagues.map((item) => item.code).filter((code) => !plan.leagues.includes(code)),
+      records: result.records,
+      errors: result.errors.length,
+    },
+    "OddsPapi sync summary",
+  );
+  return result;
+}
+
+async function syncOddsFetch(leagues: string[], now: Date): Promise<TaskResult> {
   const errors: string[] = [];
   let records = 0;
   let succeeded = false;
@@ -603,11 +736,11 @@ async function syncOdds(): Promise<TaskResult> {
   if (result.error) errors.push(result.error);
   if (!result.tournaments.length) return { records, errors, succeeded };
 
-  const selectedLeagues = new Set(apiFootballLeagues.map((item) => item.code));
+  const selectedLeagues = new Set<string>(leagues);
   const tournaments = result.tournaments.filter((item) =>
     selectedLeagues.has(item.leagueCode),
   );
-  if (tournaments.length < apiFootballLeagues.length) {
+  if (tournaments.length < leagues.length) {
     errors.push("OddsPapi no informó cobertura para todas las competiciones elegidas.");
   }
 
@@ -742,7 +875,21 @@ async function syncOdds(): Promise<TaskResult> {
   } else if (succeeded && events.length && !quoteCount) {
     errors.push("OddsPapi devolvió partidos sin cuotas de los mercados reconocidos.");
   }
-  for (const event of events) records += await persistOddsEvent(event);
+  const windowEnd = now.getTime() + ODDS_FAR_HOURS * 3_600_000;
+  let unchanged = 0;
+  let outsideWindow = 0;
+  for (const event of events) {
+    if (event.kickoff.getTime() > windowEnd) { outsideWindow += 1; continue; }
+    const identity = event.oddsPapiFixtureId ?? `${event.leagueCode}|${normalizeTeam(event.homeTeam)}|${normalizeTeam(event.awayTeam)}|${event.kickoff.toISOString()}`;
+    const digest = quotesDigest(event.quotes);
+    if (lastEventDigests.get(identity) === digest) {
+      const touched = await refreshUnchangedEvent(event);
+      if (touched != null) { records += touched; unchanged += 1; continue; }
+    }
+    records += await persistOddsEvent(event);
+    lastEventDigests.set(identity, digest);
+  }
+  logger.info({ provider: "oddspapi", events: events.length, unchanged, outsideWindow }, "Odds events persisted");
   return { records, errors, succeeded };
 }
 
@@ -799,6 +946,43 @@ async function runProviderTask(
   }
 }
 
+/** Calidad de datos: equipos de partidos próximos sin pareja en el historial (solo registra, no escribe). */
+async function reportUnmatchedTeams(): Promise<void> {
+  try {
+    const now = Date.now();
+    const rows = await db
+      .select({ leagueCode: matchesTable.leagueCode, home: matchesTable.homeTeam, away: matchesTable.awayTeam })
+      .from(matchesTable)
+      .where(
+        and(
+          gte(matchesTable.kickoff, new Date(now - 2 * 3_600_000)),
+          lte(matchesTable.kickoff, new Date(now + ODDS_FAR_HOURS * 3_600_000)),
+          notInArray(matchesTable.status, ["finished", "cancelled"]),
+        ),
+      );
+    if (!rows.length) return;
+    const history = await db
+      .selectDistinct({ leagueCode: historicalResultsTable.leagueCode, team: historicalResultsTable.homeTeam })
+      .from(historicalResultsTable);
+    const byLeague = new Map<string, string[]>();
+    for (const { leagueCode, team } of history) byLeague.set(leagueCode, [...(byLeague.get(leagueCode) ?? []), team]);
+    const unmatched = findUnmatchedTeams(
+      rows.flatMap((row) => [
+        { leagueCode: row.leagueCode, team: row.home },
+        { leagueCode: row.leagueCode, team: row.away },
+      ]),
+      byLeague,
+    );
+    if (unmatched.length) {
+      logger.warn({ unmatched, upcomingMatches: rows.length }, "Upcoming teams without a match in historical_results (add aliases in model/names.ts)");
+    } else {
+      logger.info({ upcomingMatches: rows.length }, "All upcoming teams match historical_results");
+    }
+  } catch (error) {
+    logger.warn({ detail: describeError(error) }, "Could not check unmatched teams");
+  }
+}
+
 async function runSync(options: SyncOptions): Promise<void> {
   const useApiFootball = options.providers.includes("api-football");
   const useOddsPapi = options.providers.includes("oddspapi");
@@ -839,11 +1023,12 @@ async function runSync(options: SyncOptions): Promise<void> {
   }
   if (useOddsPapi && wantOdds) {
     await runProviderTask("oddspapi", "cuotas", async () => {
-      const odds = await syncOdds();
+      const odds = await syncOdds(Boolean(options.scheduled));
       lastOddsRunAt = Date.now();
       return odds;
     });
   }
+  await reportUnmatchedTeams();
   try {
     await refreshModelPredictions();
   } catch {
@@ -917,7 +1102,7 @@ export function getNextScheduledSyncAt(): Date {
 }
 
 export const syncScheduleDescription =
-  "Fixtures y estadísticas cada 6 h (máximo 80 llamadas locales/día); cuotas cada 8 h (máximo 200 llamadas locales/mes).";
+  "Fixtures y estadísticas cada 6 h (máximo 80 llamadas locales/día); cuotas cada 8 h solo si hay partidos en las próximas 24 h (entre 24 y 48 h, una vez al día; sin partidos, sin llamadas; máximo 200 llamadas locales/mes).";
 
 export function startCollector(): void {
   if (schedulerStarted) return;

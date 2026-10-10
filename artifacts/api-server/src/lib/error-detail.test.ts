@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { describeError } from "./error-detail";
+import { describeError, pgErrorInfo } from "./error-detail";
 
 describe("describeError", () => {
   it("incluye la causa de red y oculta URLs y credenciales", () => {
@@ -20,5 +20,13 @@ describe("describeError", () => {
     const text = describeError(error);
     assert.ok(text.includes("23502") && text.includes("not-null") && text.includes("columna selection"), text);
     assert.ok(!text.includes("insert into"), text);
+  });
+});
+
+describe("pgErrorInfo", () => {
+  it("lee código y restricción de la causa de Postgres", () => {
+    const error = new Error("Failed query: insert", { cause: Object.assign(new Error("dup"), { code: "23505", constraint: "idx" }) });
+    assert.deepEqual(pgErrorInfo(error), { code: "23505", constraint: "idx" });
+    assert.deepEqual(pgErrorInfo(new Error("x")), { code: undefined, constraint: undefined });
   });
 });
