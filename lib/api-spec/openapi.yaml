@@ -16,6 +16,8 @@ tags:
     description: Fixtures, match statistics, and bookmaker markets
   - name: sources
     description: Automated data collection health and sync status
+  - name: model
+    description: Real performance of the model over settled bets
 paths:
   /healthz:
     get:
@@ -145,6 +147,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /model/performance:
+    get:
+      operationId: getModelPerformance
+      tags: [model]
+      summary: Real performance of the model over settled bets (ROI, CLV, Brier)
+      responses:
+        "200":
+          description: Aggregated performance over the prediction log
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ModelPerformance"
   /sources:
     get:
       operationId: getSourceStatus
@@ -204,6 +218,10 @@ components:
       enum: [match-result, goals, corners, cards, shots-on-target]
     Provider:
       type: string
+      enum: [api-football, oddspapi, football-data]
+    SyncProvider:
+      type: string
+      description: Providers that accept a manual sync request.
       enum: [api-football, oddspapi]
     SourceState:
       type: string
@@ -552,6 +570,66 @@ components:
         - latestStatsSync
         - dataState
         - topValueBets
+    PerformanceBucket:
+      type: object
+      description: >-
+        Aggregated result of settled bets (wins and losses; voids excluded). Null metrics mean
+        there is not enough data to compute them. Brier scores: lower is better.
+      properties:
+        bets:
+          type: integer
+          minimum: 0
+        wins:
+          type: integer
+          minimum: 0
+        hitRatePct:
+          type: ["number", "null"]
+        roiPct:
+          type: ["number", "null"]
+        roiStdErrPct:
+          type: ["number", "null"]
+        avgClvPct:
+          type: ["number", "null"]
+        avgOdds:
+          type: ["number", "null"]
+        brierModel:
+          type: ["number", "null"]
+        brierRaw:
+          type: ["number", "null"]
+        brierMarket:
+          type: ["number", "null"]
+      required:
+        - bets
+        - wins
+        - hitRatePct
+        - roiPct
+        - roiStdErrPct
+        - avgClvPct
+        - avgOdds
+        - brierModel
+        - brierRaw
+        - brierMarket
+    ModelPerformance:
+      type: object
+      properties:
+        generatedAt:
+          type: string
+          format: date-time
+        pending:
+          type: integer
+          minimum: 0
+          description: Logged bets that are not settled yet.
+        overall:
+          $ref: "#/components/schemas/PerformanceBucket"
+        byMarket:
+          type: object
+          description: Performance per market category (keys are MarketCategory values).
+          additionalProperties:
+            $ref: "#/components/schemas/PerformanceBucket"
+        reliability:
+          type: string
+          description: Plain-language warning about how much the sample can be trusted.
+      required: [generatedAt, pending, overall, byMarket, reliability]
     SourceStatus:
       type: object
       properties:
@@ -575,7 +653,7 @@ components:
         providers:
           type: array
           items:
-            $ref: "#/components/schemas/Provider"
+            $ref: "#/components/schemas/SyncProvider"
           uniqueItems: true
           maxItems: 2
       required: [scope]

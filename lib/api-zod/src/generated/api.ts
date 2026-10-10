@@ -49,7 +49,7 @@ export const GetDashboardSummaryResponse = zod.object({
   "line": zod.number().nullable(),
   "bookmaker": zod.string(),
   "decimalOdds": zod.number().gt(getDashboardSummaryResponseTopValueBetsItemOneDecimalOddsExclusiveMin),
-  "source": zod.enum(['api-football', 'oddspapi']),
+  "source": zod.enum(['api-football', 'oddspapi', 'football-data']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
 }).and(zod.object({
@@ -106,7 +106,7 @@ export const GetValueBetsResponseItem = zod.object({
   "line": zod.number().nullable(),
   "bookmaker": zod.string(),
   "decimalOdds": zod.number().gt(getValueBetsResponseOneDecimalOddsExclusiveMin),
-  "source": zod.enum(['api-football', 'oddspapi']),
+  "source": zod.enum(['api-football', 'oddspapi', 'football-data']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
 }).and(zod.object({
@@ -224,7 +224,7 @@ export const GetMatchDetailResponse = zod.object({
   "line": zod.number().nullable(),
   "bookmaker": zod.string(),
   "decimalOdds": zod.number().gt(getMatchDetailResponseOddsItemDecimalOddsExclusiveMin),
-  "source": zod.enum(['api-football', 'oddspapi']),
+  "source": zod.enum(['api-football', 'oddspapi', 'football-data']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
 })),
@@ -270,6 +270,52 @@ export const GetMatchDetailResponse = zod.object({
 
 
 /**
+ * @summary Real performance of the model over settled bets (ROI, CLV, Brier)
+ */
+export const getModelPerformanceResponsePendingMin = 0;
+
+export const getModelPerformanceResponseOverallBetsMin = 0;
+
+export const getModelPerformanceResponseOverallWinsMin = 0;
+
+export const getModelPerformanceResponseByMarketBetsMin = 0;
+
+export const getModelPerformanceResponseByMarketWinsMin = 0;
+
+
+
+export const GetModelPerformanceResponse = zod.object({
+  "generatedAt": zod.coerce.date(),
+  "pending": zod.number().int().min(getModelPerformanceResponsePendingMin).describe('Logged bets that are not settled yet.'),
+  "overall": zod.object({
+  "bets": zod.number().int().min(getModelPerformanceResponseOverallBetsMin),
+  "wins": zod.number().int().min(getModelPerformanceResponseOverallWinsMin),
+  "hitRatePct": zod.number().nullable(),
+  "roiPct": zod.number().nullable(),
+  "roiStdErrPct": zod.number().nullable(),
+  "avgClvPct": zod.number().nullable(),
+  "avgOdds": zod.number().nullable(),
+  "brierModel": zod.number().nullable(),
+  "brierRaw": zod.number().nullable(),
+  "brierMarket": zod.number().nullable()
+}).describe('Aggregated result of settled bets (wins and losses; voids excluded). Null metrics mean there is not enough data to compute them. Brier scores: lower is better.'),
+  "byMarket": zod.record(zod.string(), zod.object({
+  "bets": zod.number().int().min(getModelPerformanceResponseByMarketBetsMin),
+  "wins": zod.number().int().min(getModelPerformanceResponseByMarketWinsMin),
+  "hitRatePct": zod.number().nullable(),
+  "roiPct": zod.number().nullable(),
+  "roiStdErrPct": zod.number().nullable(),
+  "avgClvPct": zod.number().nullable(),
+  "avgOdds": zod.number().nullable(),
+  "brierModel": zod.number().nullable(),
+  "brierRaw": zod.number().nullable(),
+  "brierMarket": zod.number().nullable()
+}).describe('Aggregated result of settled bets (wins and losses; voids excluded). Null metrics mean there is not enough data to compute them. Brier scores: lower is better.')).describe('Performance per market category (keys are MarketCategory values).'),
+  "reliability": zod.string().describe('Plain-language warning about how much the sample can be trusted.')
+})
+
+
+/**
  * @summary Get provider status, quota use, and next collection time
  */
 export const getSourceStatusResponseSourcesItemRecordsCollectedMin = 0;
@@ -278,7 +324,7 @@ export const getSourceStatusResponseSourcesItemRecordsCollectedMin = 0;
 
 export const GetSourceStatusResponse = zod.object({
   "sources": zod.array(zod.object({
-  "provider": zod.enum(['api-football', 'oddspapi']),
+  "provider": zod.enum(['api-football', 'oddspapi', 'football-data']),
   "state": zod.enum(['unconfigured', 'waiting', 'ok', 'partial', 'stale', 'error']),
   "lastAttemptAt": zod.coerce.date().nullable(),
   "lastSuccessAt": zod.coerce.date().nullable(),
@@ -302,7 +348,7 @@ export const requestDataSyncBodyProvidersMax = 2;
 
 export const RequestDataSyncBody = zod.object({
   "scope": zod.enum(['all', 'fixtures', 'odds', 'stats']).default(requestDataSyncBodyScopeDefault),
-  "providers": zod.array(zod.enum(['api-football', 'oddspapi'])).max(requestDataSyncBodyProvidersMax).optional()
+  "providers": zod.array(zod.enum(['api-football', 'oddspapi']).describe('Providers that accept a manual sync request.')).max(requestDataSyncBodyProvidersMax).optional()
 })
 
 export const RequestDataSyncResponse = zod.object({

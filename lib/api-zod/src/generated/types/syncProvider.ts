@@ -6,11 +6,13 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export type Provider = typeof Provider[keyof typeof Provider];
+/**
+ * Providers that accept a manual sync request.
+ */
+export type SyncProvider = typeof SyncProvider[keyof typeof SyncProvider];
 
 
-export const Provider = {
+export const SyncProvider = {
   'api-football': 'api-football',
   oddspapi: 'oddspapi',
-  'football-data': 'football-data',
 } as const;

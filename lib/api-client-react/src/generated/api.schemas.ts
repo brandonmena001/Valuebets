@@ -35,6 +35,18 @@ export type Provider = typeof Provider[keyof typeof Provider];
 export const Provider = {
   'api-football': 'api-football',
   oddspapi: 'oddspapi',
+  'football-data': 'football-data',
+} as const;
+
+/**
+ * Providers that accept a manual sync request.
+ */
+export type SyncProvider = typeof SyncProvider[keyof typeof SyncProvider];
+
+
+export const SyncProvider = {
+  'api-football': 'api-football',
+  oddspapi: 'oddspapi',
 } as const;
 
 export type SourceState = typeof SourceState[keyof typeof SourceState];
@@ -270,6 +282,51 @@ export interface DashboardSummary {
   topValueBets: ValueBet[];
 }
 
+/**
+ * Aggregated result of settled bets (wins and losses; voids excluded). Null metrics mean there is not enough data to compute them. Brier scores: lower is better.
+ */
+export interface PerformanceBucket {
+  /** @minimum 0 */
+  bets: number;
+  /** @minimum 0 */
+  wins: number;
+  /** @nullable */
+  hitRatePct: number | null;
+  /** @nullable */
+  roiPct: number | null;
+  /** @nullable */
+  roiStdErrPct: number | null;
+  /** @nullable */
+  avgClvPct: number | null;
+  /** @nullable */
+  avgOdds: number | null;
+  /** @nullable */
+  brierModel: number | null;
+  /** @nullable */
+  brierRaw: number | null;
+  /** @nullable */
+  brierMarket: number | null;
+}
+
+/**
+ * Performance per market category (keys are MarketCategory values).
+ */
+export type ModelPerformanceByMarket = {[key: string]: PerformanceBucket};
+
+export interface ModelPerformance {
+  generatedAt: string;
+  /**
+     * Logged bets that are not settled yet.
+     * @minimum 0
+     */
+  pending: number;
+  overall: PerformanceBucket;
+  /** Performance per market category (keys are MarketCategory values). */
+  byMarket: ModelPerformanceByMarket;
+  /** Plain-language warning about how much the sample can be trusted. */
+  reliability: string;
+}
+
 export interface SourceStatus {
   sources: SourceHealth[];
   /** @nullable */
@@ -290,7 +347,7 @@ export const SyncRequestInputScope = {
 export interface SyncRequestInput {
   scope: SyncRequestInputScope;
   /** @maxItems 2 */
-  providers?: Provider[];
+  providers?: SyncProvider[];
 }
 
 export interface SyncRequestResult {
