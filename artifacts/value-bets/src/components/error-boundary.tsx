@@ -37,27 +37,20 @@ function toError(value: unknown): Error {
 
 function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50 p-6">
+    <div className="min-h-screen w-full flex items-center justify-center p-6" role="alert">
       <div className="max-w-lg w-full text-center">
-        <h1 className="text-xl font-semibold text-gray-900">
-          Something went wrong
-        </h1>
-        <p className="mt-2 text-sm text-gray-600">
-          This part of the app hit an error. The rest of the app is still
-          running.
+        <h1 style={{ fontSize: 24 }}>Algo salió mal</h1>
+        <p className="heading-note" style={{ fontSize: 14 }}>
+          Esta parte de la aplicación ha fallado. El resto sigue funcionando.
         </p>
-        {/* Dev only: messages can carry API responses and other internals. */}
+        {/* Solo en desarrollo: los mensajes pueden incluir respuestas de la API y datos internos. */}
         {import.meta.env.DEV ? (
-          <pre className="mt-4 overflow-x-auto rounded bg-gray-100 p-3 text-left text-xs text-gray-800">
+          <pre className="mt-4 overflow-x-auto rounded p-3 text-left text-xs" style={{ background: 'hsl(var(--secondary))' }}>
             {error.message || String(error)}
           </pre>
         ) : null}
-        <button
-          type="button"
-          onClick={resetError}
-          className="mt-4 rounded bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700"
-        >
-          Try again
+        <button type="button" onClick={resetError} className="button primary" style={{ marginTop: 16 }}>
+          Reintentar
         </button>
       </div>
     </div>
