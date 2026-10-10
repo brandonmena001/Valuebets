@@ -58,7 +58,7 @@ function ukToUtc(year: number, month: number, day: number, hour: number, minute:
   return new Date(naive - offsetHours * 3_600_000);
 }
 
-function parseDate(dateText: string, timeText: string): Date | null {
+export function parseDate(dateText: string, timeText: string): Date | null {
   const match = /^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/.exec(dateText.trim());
   if (!match) return null;
   const day = Number(match[1]);
@@ -121,4 +121,53 @@ export function seasonCode(startYear: number): string {
 
 export function currentSeasonStartYear(now = new Date()): number {
   return now.getUTCMonth() >= 6 ? now.getUTCFullYear() : now.getUTCFullYear() - 1;
+}
+
+export type ParsedFixture = {
+  leagueCode: string;
+  kickoff: Date;
+  homeTeam: string;
+  awayTeam: string;
+  /** Cuotas 1X2 de Bet365 si vienen en el CSV (referencia, no se guardan como cuotas de casa). */
+  homeOdds: number | null;
+  drawOdds: number | null;
+  awayOdds: number | null;
+};
+
+function decimal(value: string | undefined): number | null {
+  if (value === undefined || value.trim() === "") return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 1 ? parsed : null;
+}
+
+/**
+ * Convierte fixtures.csv de football-data (próximos partidos de muchas ligas) en partidos
+ * futuros. Solo se conservan las ligas de `leagueByDiv` (p. ej. { E0: "premier-league" }).
+ * Las filas sin equipos o sin fecha válida se omiten.
+ */
+export function parseFootballDataFixtures(
+  text: string,
+  leagueByDiv: Record<string, string>,
+): ParsedFixture[] {
+  const rows = parseCsv(text);
+  const header = rows[0]?.map((name) => name.trim());
+  if (!header) return [];
+  const col = (name: string) => header.indexOf(name);
+  const idx = { div: col("Div"), date: col("Date"), time: col("Time"), home: col("HomeTeam"), away: col("AwayTeam"), h: col("B365H"), d: col("B365D"), a: col("B365A") };
+  if (idx.div < 0 || idx.date < 0 || idx.home < 0 || idx.away < 0) return [];
+  const fixtures: ParsedFixture[] = [];
+  for (const row of rows.slice(1)) {
+    const leagueCode = leagueByDiv[row[idx.div]?.trim() ?? ""];
+    const homeTeam = row[idx.home]?.trim();
+    const awayTeam = row[idx.away]?.trim();
+    const kickoff = parseDate(row[idx.date] ?? "", idx.time >= 0 ? row[idx.time] ?? "" : "");
+    if (!leagueCode || !homeTeam || !awayTeam || !kickoff) continue;
+    fixtures.push({
+      leagueCode, kickoff, homeTeam, awayTeam,
+      homeOdds: idx.h >= 0 ? decimal(row[idx.h]) : null,
+      drawOdds: idx.d >= 0 ? decimal(row[idx.d]) : null,
+      awayOdds: idx.a >= 0 ? decimal(row[idx.a]) : null,
+    });
+  }
+  return fixtures;
 }

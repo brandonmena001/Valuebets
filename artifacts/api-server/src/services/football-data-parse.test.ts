@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { currentSeasonStartYear, parseCsv, parseFootballDataCsv, seasonCode } from "./football-data-parse";
+import { currentSeasonStartYear, parseCsv, parseFootballDataCsv, parseFootballDataFixtures, seasonCode } from "./football-data-parse";
 
 // Extractos REALES de football-data.co.uk (temporada 2025/26), recortados a las columnas Div..AR
 // (las de cuotas se omiten; el parser lee por nombre). Muestras aportadas por el usuario.
@@ -71,4 +71,38 @@ test("códigos de temporada", () => {
   assert.equal(seasonCode(2026), "2627");
   assert.equal(currentSeasonStartYear(new Date("2026-10-10T00:00:00Z")), 2026);
   assert.equal(currentSeasonStartYear(new Date("2026-03-01T00:00:00Z")), 2025);
+});
+
+// Extracto REAL de la temporada 2026/27 (E0 trae columnas nuevas HxG y AxG).
+const E0_2627 = [
+  "Div,Date,Time,HomeTeam,AwayTeam,FTHG,FTAG,FTR,HTHG,HTAG,HTR,Referee,HxG,AxG,HS,AS,HST,AST,HF,AF,HC,AC,HY,AY,HR,AR,B365H,B365D,B365A",
+  "E0,21/08/2026,20:00,Arsenal,Coventry,3,0,H,2,0,H,T Bramall,1.88,0.2,20,4,6,1,10,13,8,2,1,1,0,0,1.2,7,13",
+  "E0,22/08/2026,12:30,Hull,Man United,2,0,H,2,0,H,D England,1.01,1.83,8,21,4,5,10,9,1,6,2,1,0,0,8.5,5,1.36",
+].join("\r\n");
+
+test("E0 2026/27: las columnas HxG/AxG no desplazan las estadísticas", () => {
+  const [a, b] = parseFootballDataCsv(E0_2627, "premier-league", "2627");
+  assert.equal(a!.kickoff.toISOString(), "2026-08-21T19:00:00.000Z");
+  assert.deepEqual([a!.homeShotsOnTarget, a!.awayShotsOnTarget, a!.homeCorners, a!.awayCorners, a!.homeYellowCards, a!.awayYellowCards], [6, 1, 8, 2, 1, 1]);
+  assert.equal(b!.awayTeam, "Man United");
+  assert.deepEqual([b!.homeShotsOnTarget, b!.awayShotsOnTarget, b!.homeCorners, b!.awayCorners, b!.homeYellowCards, b!.awayYellowCards], [4, 5, 1, 6, 2, 1]);
+});
+
+// Extracto REAL de fixtures.csv (liga belga B1; sin marcador y con Referee vacío).
+const FIXTURES = [
+  "Div,Date,Time,HomeTeam,AwayTeam,Referee,B365H,B365D,B365A,BFDH",
+  "B1,09/10/2026,19:45,Beveren,Lommel SK,,1.75,3.8,3.9,1.8",
+  "B1,10/10/2026,17:15,RAAL La Louviere,Club Brugge,,6.25,4.33,1.42,7",
+  "E0,17/10/2026,15:00,Everton,Fulham,,,,,",
+].join("\r\n");
+
+test("fixtures.csv: filtra por Div, hora UK->UTC y cuotas opcionales", () => {
+  const all = parseFootballDataFixtures(FIXTURES, { B1: "belgica", E0: "premier-league" });
+  assert.equal(all.length, 3);
+  assert.equal(all[0]!.kickoff.toISOString(), "2026-10-09T18:45:00.000Z");
+  assert.deepEqual([all[0]!.homeOdds, all[0]!.drawOdds, all[0]!.awayOdds], [1.75, 3.8, 3.9]);
+  assert.deepEqual([all[2]!.homeOdds, all[2]!.awayOdds], [null, null]);
+  const onlyEngland = parseFootballDataFixtures(FIXTURES, { E0: "premier-league" });
+  assert.deepEqual(onlyEngland.map((f) => f.homeTeam), ["Everton"]);
+  assert.deepEqual(parseFootballDataFixtures("x,y\n1,2", { E0: "a" }), []);
 });
