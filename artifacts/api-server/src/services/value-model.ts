@@ -1,4 +1,4 @@
-import { and, eq, gt, gte, inArray, lt } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, lt, sql } from "drizzle-orm";
 import {
   db,
   historicalResultsTable,
@@ -10,7 +10,7 @@ import {
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { modelConfig } from "../model/config";
-import { buildPredictions, type HistoryMatch, type PlayerGame, type QuoteInput } from "../model/predict";
+import { buildPredictions, newDiagnostics, type HistoryMatch, type PlayerGame, type QuoteInput } from "../model/predict";
 import { recordPredictions, settlePredictionLog } from "./prediction-log";
 
 const HORIZON_MS = 10 * 24 * 3_600_000;
@@ -134,7 +134,36 @@ export async function refreshModelPredictions(): Promise<void> {
           .where(gte(matchesTable.kickoff, new Date(now.getTime() - PLAYER_HISTORY_MS)))
       : [];
 
-    predictions = buildPredictions({ history, playerGames, matches: upcoming, quotes, now });
+    const diagnostics = newDiagnostics();
+    predictions = buildPredictions({ history, playerGames, matches: upcoming, quotes, now, diagnostics });
+
+    // Edad real de las cuotas guardadas de estos partidos (las que ya caducaron no entran a `quotes`).
+    const freshSince = new Date(now.getTime() - modelConfig.maxOddsAgeMs);
+    const [ages] = await db
+      .select({
+        total: sql<number>`count(*)::int`,
+        fresh: sql<number>`(count(*) filter (where ${oddsQuotesTable.capturedAt} >= ${freshSince.toISOString()}::timestamptz))::int`,
+        newest: sql<string | null>`max(${oddsQuotesTable.capturedAt})`,
+      })
+      .from(oddsQuotesTable)
+      .where(inArray(oddsQuotesTable.matchId, upcoming.map((m) => m.id)));
+    const newest = ages?.newest ? new Date(ages.newest) : null;
+    const topUnsupported = Object.entries(diagnostics.unsupportedMarkets)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 15)
+      .map(([market, count]) => `${market} (${count})`);
+    logger.info(
+      {
+        maxOddsAgeHours: modelConfig.maxOddsAgeMs / 3_600_000,
+        quotesStored: ages?.total ?? 0,
+        quotesFresh: ages?.fresh ?? 0,
+        newestQuoteAgeHours: newest ? Math.round(((now.getTime() - newest.getTime()) / 3_600_000) * 10) / 10 : null,
+        funnel: diagnostics.counters,
+        bookmakersPerSelection: diagnostics.bookmakersSeen,
+        topUnsupportedMarkets: topUnsupported,
+      },
+      "Model funnel",
+    );
   }
 
   await db.transaction(async (tx) => {

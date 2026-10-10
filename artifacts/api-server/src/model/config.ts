@@ -19,7 +19,8 @@ export const modelConfig = {
   minTeamEss: num("MODEL_MIN_TEAM_ESS", 5),
 
   // --- Calidad de los datos de cuotas ---
-  maxOddsAgeMs: num("MODEL_MAX_ODDS_AGE_HOURS", 9) * 3_600_000,
+  // El colector sincroniza OddsPapi cada 7–13 h según la cuota restante; con 9 h las cuotas caducarían antes de la siguiente sincronización.
+  maxOddsAgeMs: num("MODEL_MAX_ODDS_AGE_HOURS", 14) * 3_600_000,
   minLeadMs: num("MODEL_MIN_LEAD_MINUTES", 20) * 60_000,
   minBookmakers: num("MODEL_MIN_BOOKMAKERS", 3),
   minBookmakersProps: num("MODEL_MIN_BOOKMAKERS_PROPS", 2),

@@ -353,7 +353,7 @@ router.get("/matches/:fixtureId", async (req, res): Promise<void> => {
       .sort((a, b) => b.getTime() - a.getTime())[0] ?? null;
   const model =
     row.match.status === "scheduled"
-      ? buildMatchSnapshot({ history: await loadFinishedHistory(new Date()), match: row.match, now: new Date() })
+      ? buildMatchSnapshot({ history: await loadFinishedHistory(new Date()), match: row.match, now: new Date(), quotes: quoteRows })
       : null;
   res.json(
     GetMatchDetailResponse.parse({

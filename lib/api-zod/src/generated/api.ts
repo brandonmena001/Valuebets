@@ -177,6 +177,27 @@ export const GetMatchDetailParams = zod.object({
 
 export const getMatchDetailResponseOddsItemDecimalOddsExclusiveMin = 1;
 
+export const getMatchDetailResponseModelOneBlendedTwoResultTwoModelWeightMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoResultTwoModelWeightMax = 1;
+
+export const getMatchDetailResponseModelOneBlendedTwoBttsTwoYesMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoBttsTwoYesMax = 1;
+
+export const getMatchDetailResponseModelOneBlendedTwoBttsTwoMarketYesMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoBttsTwoMarketYesMax = 1;
+
+export const getMatchDetailResponseModelOneBlendedTwoBttsTwoModelWeightMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoBttsTwoModelWeightMax = 1;
+
+export const getMatchDetailResponseModelOneBlendedTwoGoalLinesItemOverMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoGoalLinesItemOverMax = 1;
+
+export const getMatchDetailResponseModelOneBlendedTwoGoalLinesItemMarketOverMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoGoalLinesItemMarketOverMax = 1;
+
+export const getMatchDetailResponseModelOneBlendedTwoGoalLinesItemModelWeightMin = 0;
+export const getMatchDetailResponseModelOneBlendedTwoGoalLinesItemModelWeightMax = 1;
+
 export const getMatchDetailResponseModelOneBttsMin = 0;
 export const getMatchDetailResponseModelOneBttsMax = 1;
 
@@ -239,6 +260,35 @@ export const GetMatchDetailResponse = zod.object({
   "draw": zod.number(),
   "away": zod.number()
 }),
+  "blended": zod.union([zod.null(),zod.object({
+  "result": zod.union([zod.null(),zod.object({
+  "probs": zod.object({
+  "home": zod.number(),
+  "draw": zod.number(),
+  "away": zod.number()
+}),
+  "market": zod.object({
+  "home": zod.number(),
+  "draw": zod.number(),
+  "away": zod.number()
+}),
+  "modelWeight": zod.number().min(getMatchDetailResponseModelOneBlendedTwoResultTwoModelWeightMin).max(getMatchDetailResponseModelOneBlendedTwoResultTwoModelWeightMax),
+  "bookmakers": zod.number().int()
+})]),
+  "btts": zod.union([zod.null(),zod.object({
+  "yes": zod.number().min(getMatchDetailResponseModelOneBlendedTwoBttsTwoYesMin).max(getMatchDetailResponseModelOneBlendedTwoBttsTwoYesMax),
+  "marketYes": zod.number().min(getMatchDetailResponseModelOneBlendedTwoBttsTwoMarketYesMin).max(getMatchDetailResponseModelOneBlendedTwoBttsTwoMarketYesMax),
+  "modelWeight": zod.number().min(getMatchDetailResponseModelOneBlendedTwoBttsTwoModelWeightMin).max(getMatchDetailResponseModelOneBlendedTwoBttsTwoModelWeightMax),
+  "bookmakers": zod.number().int()
+})]),
+  "goalLines": zod.array(zod.object({
+  "line": zod.number(),
+  "over": zod.number().min(getMatchDetailResponseModelOneBlendedTwoGoalLinesItemOverMin).max(getMatchDetailResponseModelOneBlendedTwoGoalLinesItemOverMax),
+  "marketOver": zod.number().min(getMatchDetailResponseModelOneBlendedTwoGoalLinesItemMarketOverMin).max(getMatchDetailResponseModelOneBlendedTwoGoalLinesItemMarketOverMax),
+  "modelWeight": zod.number().min(getMatchDetailResponseModelOneBlendedTwoGoalLinesItemModelWeightMin).max(getMatchDetailResponseModelOneBlendedTwoGoalLinesItemModelWeightMax),
+  "bookmakers": zod.number().int()
+}))
+})]).optional().describe('Probabilidades ya mezcladas con el consenso del mercado (cuotas sin margen, mediana entre casas). null si no hay cuotas recientes o menos de 3 casas con el mercado completo. Mismo peso modelo/mercado que usan las value bets.\n'),
   "btts": zod.number().min(getMatchDetailResponseModelOneBttsMin).max(getMatchDetailResponseModelOneBttsMax),
   "topScores": zod.array(zod.object({
   "home": zod.number().int(),

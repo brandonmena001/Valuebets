@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { LineProbability } from './lineProbability';
+import type { MatchModelBlended } from './matchModelBlended';
 import type { MatchModelDataQuality } from './matchModelDataQuality';
 import type { MatchModelExpectedGoals } from './matchModelExpectedGoals';
 import type { MatchModelResult } from './matchModelResult';
@@ -19,6 +20,8 @@ export interface MatchModel {
   modelVersion: string;
   expectedGoals: MatchModelExpectedGoals;
   result: MatchModelResult;
+  /** Probabilidades ya mezcladas con el consenso del mercado (cuotas sin margen, mediana entre casas). null si no hay cuotas recientes o menos de 3 casas con el mercado completo. Mismo peso modelo/mercado que usan las value bets. */
+  blended?: MatchModelBlended;
   /**
      * @minimum 0
      * @maximum 1

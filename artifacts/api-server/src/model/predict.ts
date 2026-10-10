@@ -382,14 +382,36 @@ export function buildMatchSnapshot(input: {
   };
 }
 
+/**
+ * Embudo de diagnóstico: cuenta en qué etapa se pierden las selecciones. Sin esto, un resultado
+ * de 0 predicciones no dice si faltan cuotas frescas, mercados reconocidos, casas suficientes,
+ * historial del equipo o si simplemente los filtros de valor son estrictos.
+ */
+export type PredictionDiagnostics = {
+  counters: Record<string, number>;
+  /** "categoría | nombre del mercado" de cuotas que el modelo no reconoce, con su conteo. */
+  unsupportedMarkets: Record<string, number>;
+  /** Histograma: cuántas casas tenían cada selección con el mercado completo. */
+  bookmakersSeen: Record<string, number>;
+};
+
+export function newDiagnostics(): PredictionDiagnostics {
+  return { counters: {}, unsupportedMarkets: {}, bookmakersSeen: {} };
+}
+
 export function buildPredictions(input: {
   history: HistoryMatch[];
   playerGames: PlayerGame[];
   matches: UpcomingMatch[];
   quotes: QuoteInput[];
   now: Date;
+  diagnostics?: PredictionDiagnostics;
 }): PredictionOutput[] {
   const { now } = input;
+  const diag = input.diagnostics;
+  const bump = (key: string) => {
+    if (diag) diag.counters[key] = (diag.counters[key] ?? 0) + 1;
+  };
   const cfg = modelConfig;
   const leagueModels = new Map<string, LeagueModel | null>();
 
@@ -531,19 +553,43 @@ export function buildPredictions(input: {
   const outputs: PredictionOutput[] = [];
   const quotesByMatch = new Map<number, QuoteInput[]>();
   for (const quote of input.quotes) {
-    if (now.getTime() - quote.capturedAt.getTime() > cfg.maxOddsAgeMs) continue;
+    if (now.getTime() - quote.capturedAt.getTime() > cfg.maxOddsAgeMs) {
+      bump("quoteTooOld");
+      continue;
+    }
+    bump("quoteFresh");
     const list = quotesByMatch.get(quote.matchId);
     if (list) list.push(quote);
     else quotesByMatch.set(quote.matchId, [quote]);
   }
 
   for (const match of input.matches) {
-    if (match.kickoff.getTime() - now.getTime() < cfg.minLeadMs) continue;
+    bump("matches");
+    if (match.kickoff.getTime() - now.getTime() < cfg.minLeadMs) {
+      bump("matchTooSoon");
+      continue;
+    }
     const matchQuotes = quotesByMatch.get(match.id);
-    if (!matchQuotes?.length) continue;
+    if (!matchQuotes?.length) {
+      bump("matchNoFreshQuotes");
+      continue;
+    }
+    if (diag) {
+      for (const q of matchQuotes) {
+        if (classifyQuote(q, match)) bump("quoteSupported");
+        else {
+          const label = `${q.marketCategory} | ${q.marketName}`;
+          diag.unsupportedMarkets[label] = (diag.unsupportedMarkets[label] ?? 0) + 1;
+        }
+      }
+    }
 
     const entries = latestEntries(matchQuotes, match);
-    if (!entries.length) continue;
+    if (!entries.length) {
+      bump("matchNoSupportedQuotes");
+      continue;
+    }
+    bump("matchWithSupportedQuotes");
 
     // Quitar margen por casa y mercado -> consenso (mediana) entre casas.
     const consensusSamples = consensusSamplesOf(entries);
@@ -569,8 +615,16 @@ export function buildPredictions(input: {
     for (const { entry, books } of best.values()) {
       const { quote, c } = entry;
       const minBooks = c.kind === "player" ? cfg.minBookmakersProps : cfg.minBookmakers;
+      bump("selections");
+      if (diag) {
+        const seen = String(consensusSamples.get(c.consensusKey)?.get(c.selectionKey)?.length ?? 0);
+        diag.bookmakersSeen[seen] = (diag.bookmakersSeen[seen] ?? 0) + 1;
+      }
       const consensus = consensusOf(consensusSamples.get(c.consensusKey), c.kind, c.selectionKey, minBooks);
-      if (!consensus) continue;
+      if (!consensus) {
+        bump("noConsensus");
+        continue;
+      }
       const marketProb = consensus.prob;
       const booksUsed = consensus.books;
 
@@ -581,19 +635,19 @@ export function buildPredictions(input: {
       let risk = 1;
       let weightKey: keyof typeof maxModelWeight;
       if (c.kind === "result") {
-        if (!dist.result) continue;
+        if (!dist.result) { bump("noModel"); continue; }
         raw = dist.result[c.selectionKey as "home" | "draw" | "away"];
         ess = dist.ess.goals ?? 0;
         weightKey = "match-result";
       } else if (c.kind === "btts") {
-        if (!dist.matrix) continue;
+        if (!dist.matrix) { bump("noModel"); continue; }
         const yes = bttsProbability(dist.matrix);
         raw = c.selectionKey === "yes" ? yes : 1 - yes;
         ess = dist.ess.goals ?? 0;
         // Sin evidencia propia todavía: mismo peso máximo que los totales de goles.
         weightKey = "goals";
       } else if (c.kind === "handicap") {
-        if (!dist.matrix || c.line == null) continue;
+        if (!dist.matrix || c.line == null) { bump("noModel"); continue; }
         const margin = marginPmf(dist.matrix);
         const eff = effectiveProbability(
           lineOutcomeFromPmf(margin.pmf, margin.offset, -c.line, c.selectionKey === "home" ? 1 : -1),
@@ -605,7 +659,7 @@ export function buildPredictions(input: {
         weightKey = "match-result";
       } else if (c.kind === "total") {
         const pmf = dist.total[c.stat];
-        if (!pmf || c.line == null) continue;
+        if (!pmf || c.line == null) { bump("noModel"); continue; }
         const eff = effectiveProbability(lineOutcomeFromPmf(pmf, 0, c.line, c.selectionKey === "over" ? 1 : -1));
         raw = eff.prob;
         risk = eff.risk;
@@ -613,14 +667,14 @@ export function buildPredictions(input: {
         weightKey = c.stat === "goals" ? "goals" : c.stat === "corners" ? "corners" : c.stat === "cards" ? "cards" : "shots-on-target";
       } else {
         const model = quote.playerName ? playerModel(quote.playerName, match.kickoff) : null;
-        if (!model || c.line == null) continue;
+        if (!model || c.line == null) { bump("noModel"); continue; }
         const eff = effectiveProbability(lineOutcomeFromPmf(model.pmf, 0, c.line, c.selectionKey === "over" ? 1 : -1));
         raw = eff.prob;
         risk = eff.risk;
         ess = model.sampleSize;
         weightKey = "player";
       }
-      if (raw == null || !Number.isFinite(ess) || !(raw > 0)) continue;
+      if (raw == null || !Number.isFinite(ess) || !(raw > 0)) { bump("noModel"); continue; }
 
       // Mezcla modelo/mercado: el modelo pesa más cuanta más muestra efectiva tenga.
       const weight = maxModelWeight[weightKey] * (ess / (ess + ESS_HALF_WEIGHT));
@@ -631,14 +685,15 @@ export function buildPredictions(input: {
       // EV real por unidad apostada: con push/medias solo la fracción `risk` está en juego.
       const evPct = risk * (probability * odds - 1) * 100;
       const marketEvPct = risk * (marketProb * odds - 1) * 100;
-      if (odds < cfg.minOdds || odds > cfg.maxOdds) continue;
-      if (evPct < cfg.minEvPct || evPct > cfg.maxEvPct) continue;
+      if (odds < cfg.minOdds || odds > cfg.maxOdds) { bump("rejectedOddsRange"); continue; }
+      if (evPct < cfg.minEvPct) { bump("rejectedEvTooLow"); continue; }
+      if (evPct > cfg.maxEvPct) { bump("rejectedEvTooHigh"); continue; }
       // Un precio muy por encima del consenso suele ser una cuota vieja o errónea, no valor.
-      if (marketEvPct > cfg.maxMarketEvPct) continue;
+      if (marketEvPct > cfg.maxMarketEvPct) { bump("rejectedPriceOutlier"); continue; }
       // Doble confirmación: el modelo por sí solo también debe ver valor en este precio.
-      if (raw * odds < 1) continue;
+      if (raw * odds < 1) { bump("rejectedModelDisagrees"); continue; }
       // Si el modelo discrepa mucho del mercado, casi siempre le falta información (lesiones, alineación).
-      if (raw - marketProb > cfg.maxModelMarketGap) continue;
+      if (raw - marketProb > cfg.maxModelMarketGap) { bump("rejectedGapTooBig"); continue; }
 
       const fullKelly = (probability * odds - 1) / (odds - 1);
       const kellyFraction = clamp(fullKelly * cfg.kellyFraction, 0, cfg.maxStakeFraction);
@@ -647,6 +702,7 @@ export function buildPredictions(input: {
         : ess >= 12 && booksUsed >= 3 && gap <= 0.09 ? "medium"
         : "low";
 
+      bump("accepted");
       outputs.push({
         oddsQuoteId: quote.id,
         matchId: match.id,

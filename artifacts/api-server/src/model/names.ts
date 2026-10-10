@@ -28,6 +28,7 @@ const PHRASES: Array<[RegExp, string]> = [
   [/\bein frankfurt\b/, "eintracht frankfurt"],
   [/\bm gladbach\b/, "borussia monchengladbach"],
   [/\bespanol\b/, "espanyol"],
+  [/\brc deportivo de a coruna\b/, "deportivo la coruna"],
 ];
 
 function canonical(value: string): string {

@@ -151,6 +151,12 @@ export type ValueBet = OddsQuote & ({
   bookmakersCount?: number | null;
 });
 
+export interface ResultProbs {
+  home: number;
+  draw: number;
+  away: number;
+}
+
 export interface LineProbability {
   line: number;
   /**
@@ -189,6 +195,65 @@ export type MatchModelResult = {
   away: number;
 };
 
+export type MatchModelBlendedResult = {
+  probs: ResultProbs;
+  market: ResultProbs;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  modelWeight: number;
+  bookmakers: number;
+} | null;
+
+export type MatchModelBlendedBtts = {
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  yes: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  marketYes: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  modelWeight: number;
+  bookmakers: number;
+} | null;
+
+export type MatchModelBlendedGoalLinesItem = {
+  line: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  over: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  marketOver: number;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  modelWeight: number;
+  bookmakers: number;
+};
+
+/**
+ * Probabilidades ya mezcladas con el consenso del mercado (cuotas sin margen, mediana entre casas). null si no hay cuotas recientes o menos de 3 casas con el mercado completo. Mismo peso modelo/mercado que usan las value bets.
+ */
+export type MatchModelBlended = {
+  result: MatchModelBlendedResult;
+  btts: MatchModelBlendedBtts;
+  goalLines: MatchModelBlendedGoalLinesItem[];
+} | null;
+
 export type MatchModelTopScoresItem = {
   home: number;
   away: number;
@@ -221,6 +286,8 @@ export interface MatchModel {
   modelVersion: string;
   expectedGoals: MatchModelExpectedGoals;
   result: MatchModelResult;
+  /** Probabilidades ya mezcladas con el consenso del mercado (cuotas sin margen, mediana entre casas). null si no hay cuotas recientes o menos de 3 casas con el mercado completo. Mismo peso modelo/mercado que usan las value bets. */
+  blended?: MatchModelBlended;
   /**
      * @minimum 0
      * @maximum 1

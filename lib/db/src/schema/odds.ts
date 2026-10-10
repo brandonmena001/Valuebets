@@ -43,6 +43,7 @@ export const oddsQuotesTable = pgTable(
       table.upstreamMarketId,
       table.selection,
       table.line,
+      table.playerName,
       table.sourceUpdatedAt,
     ),
   ],

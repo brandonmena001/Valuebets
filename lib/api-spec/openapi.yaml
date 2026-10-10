@@ -388,6 +388,16 @@ components:
             - $ref: "#/components/schemas/MatchModel"
             - type: "null"
       required: [match, odds, model]
+    ResultProbs:
+      type: object
+      properties:
+        home:
+          type: number
+        draw:
+          type: number
+        away:
+          type: number
+      required: [home, draw, away]
     LineProbability:
       type: object
       properties:
@@ -422,6 +432,74 @@ components:
             away:
               type: number
           required: [home, draw, away]
+        blended:
+          description: >
+            Probabilidades ya mezcladas con el consenso del mercado (cuotas sin margen, mediana entre casas).
+            null si no hay cuotas recientes o menos de 3 casas con el mercado completo.
+            Mismo peso modelo/mercado que usan las value bets.
+          oneOf:
+            - type: "null"
+            - type: object
+              properties:
+                result:
+                  oneOf:
+                    - type: "null"
+                    - type: object
+                      properties:
+                        probs:
+                          $ref: "#/components/schemas/ResultProbs"
+                        market:
+                          $ref: "#/components/schemas/ResultProbs"
+                        modelWeight:
+                          type: number
+                          minimum: 0
+                          maximum: 1
+                        bookmakers:
+                          type: integer
+                      required: [probs, market, modelWeight, bookmakers]
+                btts:
+                  oneOf:
+                    - type: "null"
+                    - type: object
+                      properties:
+                        yes:
+                          type: number
+                          minimum: 0
+                          maximum: 1
+                        marketYes:
+                          type: number
+                          minimum: 0
+                          maximum: 1
+                        modelWeight:
+                          type: number
+                          minimum: 0
+                          maximum: 1
+                        bookmakers:
+                          type: integer
+                      required: [yes, marketYes, modelWeight, bookmakers]
+                goalLines:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      line:
+                        type: number
+                      over:
+                        type: number
+                        minimum: 0
+                        maximum: 1
+                      marketOver:
+                        type: number
+                        minimum: 0
+                        maximum: 1
+                      modelWeight:
+                        type: number
+                        minimum: 0
+                        maximum: 1
+                      bookmakers:
+                        type: integer
+                    required: [line, over, marketOver, modelWeight, bookmakers]
+              required: [result, btts, goalLines]
         btts:
           type: number
           minimum: 0
