@@ -8,10 +8,17 @@
 - Motivo: no es aditivo (reemplaza un índice, sin pérdida de datos). No lo apliqué por la regla 4.
 
 ## 2. Alias de equipos (`artifacts/api-server/src/model/names.ts`)
-- Pendiente de datos reales: tras la próxima sincronización busca en los logs de Replit la línea
-  `Upcoming teams without a match in historical_results` y pega el campo `unmatched`. Con eso se listan aquí los alias exactos.
-- Comprobado localmente con nombres de football-data de las muestras (Ein Frankfurt, Vallecano, Man United, Ath Madrid…) y nombres completos supuestos (no son los reales de OddsPapi): `resolveName` los empareja.
+Dato REAL del log de Replit (10-oct-2026, 13 partidos próximos): un solo equipo sin emparejar.
+- `la-liga`: "RC Deportivo de A Coruna" (nombre de OddsPapi) → "sin coincidencia".
+- Cambio propuesto en `PHRASES` (probado en una COPIA de names.ts con "La Coruna" en el historial, que es la forma habitual de football-data; el nombre real en tu `historical_results` aún no está verificado):
+  `[/\brc deportivo de a coruna\b/, "deportivo la coruna"],`
+- Comprobar antes en Replit el nombre guardado:
+  `select distinct home_team from historical_results where league_code='la-liga' and (home_team ilike '%coru%' or home_team ilike '%depor%')`
+  Si no devuelve filas, el equipo aún no tiene partidos importados y no es un problema de alias.
 
 ## 3. Comando de pruebas
 Añadir al comando de tests estándar estos archivos nuevos (están en `artifacts/api-server/src`):
 `services/football-data-parse.test.ts lib/odds-plan.test.ts lib/team-coverage.test.ts` (y `pnpm --filter @workspace/db run push` por la tabla nueva `provider_cache`).
+
+## 4. Observación fuera de mi zona (modelo)
+En el log real: `Model predictions refreshed` con `predictions: 0`, `history: 1221`, `upcoming: 41`. No investigado (zona del modelo). Conviene revisar por qué no se genera ninguna predicción (¿antigüedad de cuotas > 9 h?, ¿mínimo de partidos por equipo?, ¿marcador de mercados?).
