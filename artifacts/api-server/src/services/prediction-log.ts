@@ -9,6 +9,7 @@ import {
   predictionLogTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { lineReturn, type LineResult } from "../model/lines";
 import { normalizeName, resolveName } from "../model/names";
 import type { PredictionOutput } from "../model/predict";
 import { settleOutcome } from "../model/settle";
@@ -96,7 +97,7 @@ export async function settlePredictionLog(): Promise<number> {
   let settled = 0;
   for (const row of pending) {
     const { log } = row;
-    let outcome: "win" | "loss" | "void" | null = null;
+    let outcome: LineResult | "void" | null = null;
     if ((row.status === "cancelled" || row.status === "postponed") && row.kickoff < threeDaysAgo) {
       outcome = "void";
     } else if (
@@ -197,17 +198,20 @@ function summarize(
       avgClvPct: null, avgOdds: null, brierModel: null, brierRaw: null, brierMarket: null,
     };
   }
-  const wins = rows.filter((r) => r.outcome === "win").length;
-  const returns = rows.map((r) => (r.outcome === "win" ? r.decimalOdds - 1 : -1));
+  // Resultados: win/loss, y con líneas enteras o de cuarto también push, half-win y half-loss.
+  const decisive = rows.filter((r) => r.outcome === "win" || r.outcome === "loss");
+  const wins = decisive.filter((r) => r.outcome === "win").length;
+  const returns = rows.map((r) => lineReturn(r.outcome as LineResult, r.decimalOdds));
   const mean = returns.reduce((a, b) => a + b, 0) / n;
   const variance = n > 1 ? returns.reduce((a, b) => a + (b - mean) ** 2, 0) / (n - 1) : 0;
   const clv = rows.filter((r) => r.closingOdds && r.closingOdds > 1).map((r) => r.decimalOdds / r.closingOdds! - 1);
+  // Brier solo con apuestas decididas (las probabilidades de líneas con push son "sin push").
   const brier = (pick: (r: (typeof rows)[number]) => number) =>
-    rows.reduce((a, r) => a + (pick(r) - (r.outcome === "win" ? 1 : 0)) ** 2, 0) / n;
+    decisive.length ? decisive.reduce((a, r) => a + (pick(r) - (r.outcome === "win" ? 1 : 0)) ** 2, 0) / decisive.length : null;
   return {
     bets: n,
     wins,
-    hitRatePct: (wins / n) * 100,
+    hitRatePct: decisive.length ? (wins / decisive.length) * 100 : null,
     roiPct: mean * 100,
     roiStdErrPct: n > 1 ? (Math.sqrt(variance / n)) * 100 : null,
     avgClvPct: clv.length ? (clv.reduce((a, b) => a + b, 0) / clv.length) * 100 : null,
@@ -223,7 +227,7 @@ export async function getModelPerformance() {
     .select()
     .from(predictionLogTable)
     .where(and(isNotNull(predictionLogTable.outcome)));
-  const settled = rows.filter((r) => r.outcome === "win" || r.outcome === "loss");
+  const settled = rows.filter((r) => r.outcome != null && r.outcome !== "void");
   const [pendingRow] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(predictionLogTable)

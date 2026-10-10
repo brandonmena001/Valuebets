@@ -1,3 +1,4 @@
+import { resultFor, type LineResult } from "./lines";
 import type { SelectionKey } from "./markets";
 
 export type SettleInput = {
@@ -21,10 +22,24 @@ export type SettleInput = {
   playerShots: number | null;
 };
 
-/** Devuelve win/loss o null si todavía faltan datos para liquidar. */
-export function settleOutcome(input: SettleInput): "win" | "loss" | null {
+/**
+ * Devuelve el resultado de la apuesta o null si todavía faltan datos para liquidar.
+ * Con líneas enteras/de cuarto puede ser push (devuelto), half-win o half-loss.
+ */
+export function settleOutcome(input: SettleInput): LineResult | null {
   const key = input.selectionKey as SelectionKey;
   const { homeScore, awayScore, stats } = input;
+
+  // Ambos anotan
+  if (key === "yes" || key === "no") {
+    const both = homeScore > 0 && awayScore > 0;
+    return both === (key === "yes") ? "win" : "loss";
+  }
+
+  // Hándicap asiático: home/away con línea (la línea es el hándicap del local).
+  if ((key === "home" || key === "away") && input.line != null) {
+    return resultFor(homeScore - awayScore, -input.line, key === "home" ? 1 : -1);
+  }
 
   if (input.marketCategory === "match-result") {
     const actual = homeScore > awayScore ? "home" : homeScore < awayScore ? "away" : "draw";
@@ -51,7 +66,7 @@ export function settleOutcome(input: SettleInput): "win" | "loss" | null {
     }
   }
   if (total == null || input.line == null) return null;
-  if (key === "over") return total > input.line ? "win" : "loss";
-  if (key === "under") return total < input.line ? "win" : "loss";
+  if (key === "over") return resultFor(total, input.line, 1);
+  if (key === "under") return resultFor(total, input.line, -1);
   return null;
 }
