@@ -14,4 +14,4 @@
 
 ## 3. Comando de pruebas
 Añadir al comando de tests estándar estos archivos nuevos (están en `artifacts/api-server/src`):
-`services/football-data-parse.test.ts lib/odds-plan.test.ts lib/team-coverage.test.ts`.
+`services/football-data-parse.test.ts lib/odds-plan.test.ts lib/team-coverage.test.ts` (y `pnpm --filter @workspace/db run push` por la tabla nueva `provider_cache`).

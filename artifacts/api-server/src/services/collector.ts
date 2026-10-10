@@ -7,6 +7,7 @@ import {
   oddsQuotesTable,
   historicalResultsTable,
   playerMatchStatsTable,
+  providerCacheTable,
   providerTournamentsTable,
   sourceStatusTable,
 } from "@workspace/db";
@@ -39,6 +40,8 @@ import { findUnmatchedTeams } from "../lib/team-coverage";
 import { fetchUpcomingFixtures, importFootballData } from "./football-data";
 import {
   ODDS_FAR_HOURS,
+  ODDS_MIN_GAP_MS,
+  paceGapMs,
   planOddsFetch,
   quotesDigest,
   type CalendarMatch,
@@ -86,7 +89,7 @@ const providerKeys: Record<ProviderName, string | undefined> = {
   "api-football": process.env.API_FOOTBALL_KEY,
   oddspapi: process.env.ODDSPAPI_API_KEY,
 };
-type TaskResult = { records: number; errors: string[]; succeeded: boolean };
+type TaskResult = { records: number; errors: string[]; succeeded: boolean; skipped?: boolean };
 
 function providerPeriod(provider: ProviderName, now = new Date()): Date {
   if (provider === "api-football") {
@@ -624,6 +627,28 @@ async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReference
     Date.now() - oddsReferenceCache.loadedAt < ODDSPAPI_REFERENCE_CACHE_MS
   ) return oddsReferenceCache;
 
+  try {
+    const [row] = await db.select().from(providerCacheTable).where(eq(providerCacheTable.key, "oddspapi-reference")).limit(1);
+    if (row && Date.now() - row.updatedAt.getTime() < ODDSPAPI_REFERENCE_CACHE_MS) {
+      const saved = JSON.parse(row.payload) as { bookmakers?: unknown; participants?: unknown; markets?: unknown };
+      if (
+        Array.isArray(saved.bookmakers) && saved.bookmakers.length &&
+        Array.isArray(saved.markets) && saved.markets.length &&
+        typeof saved.participants === "object" && saved.participants != null
+      ) {
+        oddsReferenceCache = {
+          loadedAt: row.updatedAt.getTime(),
+          bookmakers: saved.bookmakers as OddsPapiBookmaker[],
+          participants: saved.participants as Record<string, string>,
+          markets: saved.markets as OddsPapiMarket[],
+        };
+        logger.info({ provider: "oddspapi" }, "Odds reference data loaded from database cache (0 calls)");
+        return oddsReferenceCache;
+      }
+    }
+  } catch {
+    // La tabla provider_cache puede no existir aún (falta db push): se consulta la API como antes.
+  }
   const bookmakerResult = await callOddsPapi(fetchFootballBookmakers, "reference");
   const participantResult = await callOddsPapi(fetchFootballParticipants, "reference");
   const marketResult = await callOddsPapi(fetchFootballMarkets, "reference");
@@ -639,6 +664,15 @@ async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReference
     participants,
     markets,
   };
+  try {
+    const payload = JSON.stringify({ bookmakers, participants, markets });
+    await db
+      .insert(providerCacheTable)
+      .values({ key: "oddspapi-reference", payload, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: providerCacheTable.key, set: { payload, updatedAt: new Date() } });
+  } catch (error) {
+    logger.warn({ detail: describeError(error) }, "Could not persist odds reference data (¿falta db push de provider_cache?)");
+  }
   return oddsReferenceCache;
 }
 
@@ -686,16 +720,30 @@ export async function refreshUnchangedEvent(event: NormalizedOddsEvent): Promise
   return touched >= fingerprints.length ? touched : null;
 }
 
-async function syncOdds(scheduled = true): Promise<TaskResult> {
+export async function syncOdds(scheduled = true): Promise<TaskResult> {
   oddsCalls = { reference: 0, tournaments: 0, odds: 0 };
   const startedAt = new Date();
+  // La última sincronización exitosa se lee de la base: sobrevive a los reinicios del servidor.
+  const sourceRow = await sourceRecord("oddspapi");
+  const lastFetch = Math.max(lastOddsFetchAt, sourceRow.lastSuccessAt?.getTime() ?? 0);
+  if (scheduled) {
+    const samePeriod = periodKey(sourceRow.quotaPeriodStart) === periodKey(providerPeriod("oddspapi", startedAt));
+    const gap = Math.max(ODDS_MIN_GAP_MS, paceGapMs({ used: samePeriod ? sourceRow.requestsUsed : 0, cap: ODDSPAPI_LOCAL_MONTHLY_CAP, now: startedAt }));
+    if (startedAt.getTime() - lastFetch < gap) {
+      logger.info(
+        { provider: "oddspapi", calls: 0, reason: "separación mínima entre sincronizaciones", gapHours: Number.isFinite(gap) ? Math.round(gap / 360_000) / 10 : null, monthUsed: sourceRow.requestsUsed },
+        "OddsPapi sync skipped to save quota",
+      );
+      return { records: 0, errors: [], succeeded: false, skipped: true };
+    }
+  }
   const calendarInfo = await loadOddsCalendar(startedAt);
   const plan = planOddsFetch({
     calendar: calendarInfo.calendar,
     calendarKnown: calendarInfo.known,
     allLeagues: apiFootballLeagues.map((item) => item.code),
     now: startedAt,
-    lastFetchAt: lastOddsFetchAt,
+    lastFetchAt: lastFetch,
     lastDiscoveryAt: lastOddsDiscoveryAt,
     scheduled,
   });
@@ -704,7 +752,7 @@ async function syncOdds(scheduled = true): Promise<TaskResult> {
       { provider: "oddspapi", calls: 0, reason: plan.reason, calendarKnown: calendarInfo.known, calendarError: calendarInfo.error, near: plan.near, far: plan.far },
       "OddsPapi sync skipped to save quota",
     );
-    return { records: 0, errors: [], succeeded: false };
+    return { records: 0, errors: [], succeeded: false, skipped: true };
   }
   lastOddsFetchAt = Date.now();
   if (!calendarInfo.known) lastOddsDiscoveryAt = Date.now();
@@ -908,6 +956,7 @@ async function runProviderTask(
     });
     return;
   }
+  const previous = await sourceRecord(provider);
   await updateSource(provider, {
     state: "waiting",
     lastAttemptAt: new Date(),
@@ -915,6 +964,15 @@ async function runProviderTask(
   });
   try {
     const result = await action();
+    if (result.skipped) {
+      // Omitida para ahorrar cuota: se conserva el último estado conocido en vez de mostrar "sin datos".
+      await updateSource(provider, {
+        state: previous.state,
+        recordsCollected: previous.recordsCollected,
+        message: previous.message,
+      });
+      return;
+    }
     const state = result.errors.length
       ? result.succeeded
         ? "partial"

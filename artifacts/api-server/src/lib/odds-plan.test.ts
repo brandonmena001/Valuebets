@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { planOddsFetch, quotesDigest } from "./odds-plan";
+import { ODDS_MIN_GAP_MS, paceGapMs, planOddsFetch, quotesDigest } from "./odds-plan";
 
 const NOW = new Date("2026-10-10T12:00:00Z");
 const H = 3_600_000;
@@ -41,5 +41,19 @@ describe("quotesDigest", () => {
   it("no depende del orden y cambia si cambia una cuota", () => {
     assert.equal(quotesDigest([q(2), q(3, "Away")]), quotesDigest([q(3, "Away"), q(2)]));
     assert.notEqual(quotesDigest([q(2)]), quotesDigest([q(2.05)]));
+  });
+});
+
+describe("paceGapMs", () => {
+  const day10 = new Date("2026-10-10T17:00:00Z");
+  it("con la cuota de tu caso (117/200 el día 10) estira la separación a más de 7 h", () => {
+    const gap = paceGapMs({ used: 117, cap: 200, now: day10 });
+    assert.ok(gap > ODDS_MIN_GAP_MS && gap < 24 * H, `gap=${gap / H} h`);
+  });
+  it("con cuota de sobra usa el mínimo de 7 h", () => {
+    assert.equal(paceGapMs({ used: 10, cap: 200, now: day10 }), ODDS_MIN_GAP_MS);
+  });
+  it("sin cuota suficiente no permite sincronizar", () => {
+    assert.equal(paceGapMs({ used: 195, cap: 200, now: day10 }), Number.POSITIVE_INFINITY);
   });
 });

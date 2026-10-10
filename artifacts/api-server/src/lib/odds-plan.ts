@@ -77,3 +77,23 @@ export function quotesDigest(
     .sort();
   return createHash("sha256").update(keys.join("\n")).digest("hex");
 }
+
+export const ODDS_MIN_GAP_MS = 7 * HOUR;
+export const ODDS_CALLS_PER_SYNC = 2;
+const ODDS_QUOTA_RESERVE = 6;
+
+/**
+ * Separación mínima entre sincronizaciones programadas para no agotar la cuota del mes.
+ * Reparte las llamadas restantes (menos una reserva) entre los días que faltan. Devuelve
+ * Infinity si ya no alcanza ni para una sincronización.
+ */
+export function paceGapMs(input: { used: number; cap: number; now: Date; callsPerSync?: number }): number {
+  const perSync = input.callsPerSync ?? ODDS_CALLS_PER_SYNC;
+  const syncsLeft = Math.floor((input.cap - input.used - ODDS_QUOTA_RESERVE) / perSync);
+  if (syncsLeft <= 0) return Number.POSITIVE_INFINITY;
+  const year = input.now.getUTCFullYear();
+  const month = input.now.getUTCMonth();
+  const endOfMonth = Date.UTC(year, month + 1, 1);
+  const remainingMs = Math.max(HOUR, endOfMonth - input.now.getTime());
+  return Math.max(ODDS_MIN_GAP_MS, remainingMs / syncsLeft);
+}
