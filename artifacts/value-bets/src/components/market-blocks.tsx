@@ -11,11 +11,11 @@ import { slipItemId } from '@/lib/slip';
 
 export type Pick = { market: string; selection: string; probability: number };
 
-export function PickRow({ fixtureId, match, pick, label }: { fixtureId: string; match: string; pick: Pick; label?: string }) {
+export function PickRow({ fixtureId, match, pick, label, source = 'model' }: { fixtureId: string; match: string; pick: Pick; label?: string; source?: 'blend' | 'model' }) {
   return <div className="fd-pick">
     <div><div className="fd-pick-name">{label ?? pick.selection}</div><div className="fd-bet-sub">Cuota justa {formatFairOdds(pick.probability)}</div></div>
     <div className="fd-pick-right"><strong>{formatPct(pick.probability)}</strong>
-      <AddToSlip compact item={{ id: slipItemId(fixtureId, pick.market, pick.selection), fixtureId, match, market: pick.market, selection: pick.selection, probability: pick.probability, source: 'model' }} />
+      <AddToSlip compact item={{ id: slipItemId(fixtureId, pick.market, pick.selection), fixtureId, match, market: pick.market, selection: pick.selection, probability: pick.probability, source }} />
     </div>
   </div>;
 }
@@ -29,16 +29,18 @@ type LineTableProps = {
   sides?: readonly [string, string];
   /** Texto de la selección que se guarda en el cupón. */
   selectionLabel?: (side: string, line: number) => string;
+  /** 'blend' si las probabilidades ya incluyen el consenso del mercado. */
+  source?: 'blend' | 'model';
 };
 
-export function LineTable({ fixtureId, match, market, lines, sides = ['Más', 'Menos'], selectionLabel = (side, line) => `${side} de ${line}` }: LineTableProps) {
+export function LineTable({ fixtureId, match, market, lines, sides = ['Más', 'Menos'], selectionLabel = (side, line) => `${side} de ${line}`, source = 'model' }: LineTableProps) {
   return <div className="fd-lines">
     <div className="fd-lines-head"><span>Línea</span><span>{sides[0]}</span><span>{sides[1]}</span></div>
     {lines.map(({ line, over }) => <div className="fd-lines-row" key={line}>
       <span className="mono">{line}</span>
       {([[sides[0], over], [sides[1], 1 - over]] as const).map(([side, probability]) => <span className="fd-lines-cell" key={side}>
         <em>{formatPct(probability, 0)}</em>
-        <AddToSlip compact item={{ id: slipItemId(fixtureId, `${market} ${line}`, side), fixtureId, match, market: `${market} ${line}`, selection: selectionLabel(side, line), probability, source: 'model' }} />
+        <AddToSlip compact item={{ id: slipItemId(fixtureId, `${market} ${line}`, side), fixtureId, match, market: `${market} ${line}`, selection: selectionLabel(side, line), probability, source }} />
       </span>)}
     </div>)}
   </div>;

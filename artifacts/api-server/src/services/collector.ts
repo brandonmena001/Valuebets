@@ -106,6 +106,28 @@ function defaultLimit(provider: ProviderName): number {
   return provider === "api-football" ? API_FOOTBALL_LOCAL_DAILY_CAP : ODDSPAPI_LOCAL_MONTHLY_CAP;
 }
 
+/** Publica en Fuentes el resultado de la importación de football-data.co.uk (no usa clave ni cuota). */
+export async function recordFootballDataStatus(history: { rows: number; errors: string[]; skipped: boolean }): Promise<void> {
+  if (history.skipped) return; // limitada por frecuencia: se conserva el estado anterior
+  const now = new Date();
+  const state = history.rows > 0 ? (history.errors.length ? "partial" : "ok") : "error";
+  const message =
+    history.rows > 0
+      ? `${history.rows} resultados importados${history.errors.length ? `; con avisos: ${history.errors.slice(0, 2).join(" | ")}` : ""}.`
+      : `No se importó ningún resultado${history.errors.length ? `: ${history.errors.slice(0, 2).join(" | ")}` : ""}.`;
+  const values = {
+    state,
+    lastAttemptAt: now,
+    recordsCollected: history.rows,
+    message: message.slice(0, 300),
+    ...(history.rows > 0 ? { lastSuccessAt: now } : {}),
+  };
+  await db
+    .insert(sourceStatusTable)
+    .values({ provider: "football-data", ...values })
+    .onConflictDoUpdate({ target: sourceStatusTable.provider, set: values });
+}
+
 async function ensureSourceRow(provider: ProviderName): Promise<void> {
   const configured = Boolean(providerKeys[provider]);
   const [existing] = await db
@@ -1078,6 +1100,9 @@ async function runSync(options: SyncOptions): Promise<void> {
     // Historial gratuito (football-data.co.uk): no depende del plan de API-Football.
     const history = await importFootballData({ force: !options.scheduled });
     if (history.errors.length) logger.warn({ errors: history.errors }, "football-data import had errors");
+    await recordFootballDataStatus(history).catch((error) =>
+      logger.warn({ detail: describeError(error) }, "Could not record football-data status"),
+    );
   }
   if (useOddsPapi && wantOdds) {
     await runProviderTask("oddspapi", "cuotas", async () => {
@@ -1211,6 +1236,18 @@ export async function getProviderStatusRows() {
   ]);
   const rows = await db.select().from(sourceStatusTable);
   return rows.map((row) => {
+    if (row.provider === "football-data") {
+      return {
+        provider: "football-data" as const,
+        state: row.state,
+        lastAttemptAt: row.lastAttemptAt?.toISOString() ?? null,
+        lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,
+        recordsCollected: row.recordsCollected,
+        requestsRemaining: null,
+        requestLimit: null,
+        message: row.message,
+      };
+    }
     const provider = row.provider as ProviderName;
     const period = providerPeriod(provider);
     const used =

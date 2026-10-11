@@ -73,6 +73,11 @@ const model = {
     { stat: 'shots-on-target', homeExpected: 5.2, awayExpected: 3.9, totalExpected: 9.1, lines: lines([[7.5, 0.7], [8.5, 0.55]]) },
   ],
   dataQuality: { score: 78, level: 'high', homeSample: 22.4, awaySample: 19.8 },
+  blended: {
+    result: { probs: { home: 0.44, draw: 0.27, away: 0.29 }, market: { home: 0.43, draw: 0.27, away: 0.3 }, modelWeight: 0.26, bookmakers: 6 },
+    btts: { yes: 0.55, marketYes: 0.54, modelWeight: 0.3, bookmakers: 5 },
+    goalLines: [{ line: 2.5, over: 0.54, marketOver: 0.53, modelWeight: 0.3, bookmakers: 6 }],
+  },
 };
 
 function matchDetail(fixtureId: string) {

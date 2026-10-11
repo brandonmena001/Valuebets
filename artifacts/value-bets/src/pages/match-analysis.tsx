@@ -16,7 +16,17 @@ const levelNames = { high: 'Alta', medium: 'Media', low: 'Baja' } as const;
 const when = (value: string) => formatDate(value, { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 function ModelSections({ model, fixtureId, match, home, away }: { model: MatchModel; fixtureId: string; match: string; home: string; away: string }) {
-  const { result } = model;
+  // Si hay consenso de mercado suficiente, la ficha muestra la probabilidad ya mezclada (la misma que usan
+  // las value bets). La del modelo puro se conserva como referencia.
+  const blended = model.blended ?? null;
+  const blendedResult = blended?.result ?? null;
+  const result = blendedResult?.probs ?? model.result;
+  const resultSource = blendedResult ? 'blend' : 'model';
+  const btts = blended?.btts?.yes ?? model.btts;
+  const bttsSource = blended?.btts ? 'blend' : 'model';
+  const blendedLines = new Map((blended?.goalLines ?? []).map(entry => [entry.line, entry.over]));
+  const goalLines = model.goalLines.map(entry => ({ line: entry.line, over: blendedLines.get(entry.line) ?? entry.over }));
+  const goalSource = goalLines.every(entry => blendedLines.has(entry.line)) ? 'blend' : 'model';
   const picks: Pick[] = [
     { market: '1X2', selection: `Gana ${home}`, probability: result.home },
     { market: '1X2', selection: 'Empate', probability: result.draw },
@@ -30,17 +40,20 @@ function ModelSections({ model, fixtureId, match, home, away }: { model: MatchMo
   return <>
     <section className="fd-card">
       <h2 className="fd-h">Resultado (1X2)</h2>
+      <div className="fd-bet-sub" style={{ marginBottom: 8 }}>{blendedResult
+        ? `Mezcla de modelo y mercado · el modelo pesa ${Math.round(blendedResult.modelWeight * 100)} % · ${blendedResult.bookmakers} casas. Modelo puro: ${formatPct(model.result.home, 0)} / ${formatPct(model.result.draw, 0)} / ${formatPct(model.result.away, 0)}`
+        : 'Modelo puro (sin consenso de mercado suficiente)'}</div>
       <div className="fd-triple">
         {picks.map((pick, index) => <div className={`fd-prob ${index === 0 ? 'home' : index === 2 ? 'away' : ''}`} key={pick.selection}>
           <div className="fd-label">{index === 0 ? 'Local' : index === 2 ? 'Visitante' : 'Empate'}</div>
           <div className="fd-big">{formatPct(pick.probability)}</div>
           <div className="fd-bet-sub">{index === 1 ? 'X' : index === 0 ? home : away}</div>
           <div className="fd-bar"><div className="fd-bar-fill" style={{ width: `${pick.probability * 100}%` }} /></div>
-          <AddToSlip compact item={{ id: slipItemId(fixtureId, pick.market, pick.selection), fixtureId, match, market: pick.market, selection: pick.selection, probability: pick.probability, source: 'model' }} />
+          <AddToSlip compact item={{ id: slipItemId(fixtureId, pick.market, pick.selection), fixtureId, match, market: pick.market, selection: pick.selection, probability: pick.probability, source: resultSource }} />
         </div>)}
       </div>
       <h3 className="fd-sub">Doble oportunidad</h3>
-      {double.map(pick => <PickRow key={pick.selection} fixtureId={fixtureId} match={match} pick={pick} />)}
+      {double.map(pick => <PickRow key={pick.selection} fixtureId={fixtureId} match={match} pick={pick} source={resultSource} />)}
     </section>
 
     <section className="fd-card">
@@ -52,10 +65,10 @@ function ModelSections({ model, fixtureId, match, home, away }: { model: MatchMo
 
     <section className="fd-card">
       <h2 className="fd-h">Goles</h2>
-      <PickRow fixtureId={fixtureId} match={match} label="Ambos equipos anotan: Sí" pick={{ market: 'Ambos anotan', selection: 'Sí', probability: model.btts }} />
-      <PickRow fixtureId={fixtureId} match={match} label="Ambos equipos anotan: No" pick={{ market: 'Ambos anotan', selection: 'No', probability: 1 - model.btts }} />
+      <PickRow fixtureId={fixtureId} match={match} label="Ambos equipos anotan: Sí" source={bttsSource} pick={{ market: 'Ambos anotan', selection: 'Sí', probability: btts }} />
+      <PickRow fixtureId={fixtureId} match={match} label="Ambos equipos anotan: No" source={bttsSource} pick={{ market: 'Ambos anotan', selection: 'No', probability: 1 - btts }} />
       <h3 className="fd-sub">Total de goles</h3>
-      <LineTable fixtureId={fixtureId} match={match} market="Goles totales" lines={model.goalLines} />
+      <LineTable fixtureId={fixtureId} match={match} market="Goles totales" lines={goalLines} source={goalSource} />
     </section>
 
     {model.teamStats.map(stat => <section className="fd-card" key={stat.stat}>
@@ -108,7 +121,7 @@ export default function MatchAnalysisPage() {
       </section>
 
       {match.status === 'scheduled' && !model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>Aún no hay datos suficientes de ambos equipos para calcular el modelo. Se activará cuando haya más partidos con estadísticas.</span></div>}
-      {model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>Probabilidades del modelo estadístico, sin mezclar con el mercado. Son una estimación, no una certeza: el mercado suele ser más preciso, así que compara siempre con las value bets de abajo.</span></div>}
+      {model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>{model.blended ? 'El 1X2, «ambos anotan» y los goles mostrados ya se mezclan con el consenso del mercado; córners, tarjetas y tiros son del modelo puro. ' : 'Probabilidades del modelo estadístico, sin consenso de mercado disponible. '}Son una estimación, no una certeza: el mercado suele ser más preciso, así que compara siempre con las value bets de abajo.</span></div>}
 
       {model && <ModelSections model={model} fixtureId={fixtureId} match={label} home={match.homeTeam} away={match.awayTeam} />}
 
