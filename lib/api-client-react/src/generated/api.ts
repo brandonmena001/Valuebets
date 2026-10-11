@@ -27,6 +27,7 @@ import type {
   HealthStatus,
   MatchDetail,
   MatchSummary,
+  ModelPerformance,
   SourceStatus,
   SyncRequestInput,
   SyncRequestResult,
@@ -448,6 +449,83 @@ export function useGetMatchDetail<TData = Awaited<ReturnType<typeof getMatchDeta
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetMatchDetailQueryOptions(fixtureId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetModelPerformanceUrl = () => {
+
+
+
+
+  return `/api/model/performance`
+}
+
+/**
+ * @summary Real performance of the model over settled bets (ROI, CLV, Brier)
+ */
+export const getModelPerformance = async ( options?: Parameters<typeof customFetch>[1]): Promise<ModelPerformance> => {
+
+  return customFetch<ModelPerformance>(getGetModelPerformanceUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetModelPerformanceQueryKey = () => {
+    return [
+    `/api/model/performance`
+    ] as const;
+    }
+
+
+export const getGetModelPerformanceQueryOptions = <TData = Awaited<ReturnType<typeof getModelPerformance>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getModelPerformance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetModelPerformanceQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getModelPerformance>>> = ({ signal }) => getModelPerformance({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getModelPerformance>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetModelPerformanceQueryResult = NonNullable<Awaited<ReturnType<typeof getModelPerformance>>>
+export type GetModelPerformanceQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Real performance of the model over settled bets (ROI, CLV, Brier)
+ */
+
+export function useGetModelPerformance<TData = Awaited<ReturnType<typeof getModelPerformance>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getModelPerformance>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetModelPerformanceQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

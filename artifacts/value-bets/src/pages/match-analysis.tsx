@@ -1,42 +1,19 @@
-import { ChevronLeft, AlertCircle, Info } from 'lucide-react';
+import { ChevronLeft, Info } from 'lucide-react';
 import { Link, useParams } from 'wouter';
 import { getGetMatchDetailQueryKey, useGetMatchDetail, useGetValueBets } from '@workspace/api-client-react';
-import type { LineProbability, MatchModel } from '@workspace/api-client-react';
+import type { MatchModel } from '@workspace/api-client-react';
 import { AddToSlip } from '@/components/add-to-slip';
 import { BetCards } from '@/components/bet-cards';
+import { LineTable, PickRow, type Pick } from '@/components/market-blocks';
+import { EmptyState, ErrorNotice, SkeletonBlock, loadErrorMessage } from '@/components/states';
+import { formatDate, formatPct } from '@/lib/format';
+import { leagues } from '@/lib/labels';
 import { slipItemId } from '@/lib/slip';
 
-const leagues: Record<string, string> = { 'premier-league': 'Premier League', 'la-liga': 'LaLiga', bundesliga: 'Bundesliga' };
 const statNames = { corners: 'Córners', cards: 'Tarjetas', 'shots-on-target': 'Tiros a puerta' } as const;
 const levelNames = { high: 'Alta', medium: 'Media', low: 'Baja' } as const;
 
-const pct = (value: number, decimals = 1) => `${new Intl.NumberFormat('es-CO', { minimumFractionDigits: decimals, maximumFractionDigits: decimals }).format(value * 100)}%`;
-const fairOdds = (probability: number) => (probability > 0.001 ? (1 / probability).toFixed(2) : '—');
-const when = (value: string) => new Intl.DateTimeFormat('es-CO', { timeZone: 'America/Bogota', weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
-
-type Pick = { market: string; selection: string; probability: number };
-
-function PickRow({ fixtureId, match, pick, label }: { fixtureId: string; match: string; pick: Pick; label?: string }) {
-  return <div className="fd-pick">
-    <div><div className="fd-pick-name">{label ?? pick.selection}</div><div className="fd-bet-sub">Cuota justa {fairOdds(pick.probability)}</div></div>
-    <div className="fd-pick-right"><strong>{pct(pick.probability)}</strong>
-      <AddToSlip compact item={{ id: slipItemId(fixtureId, pick.market, pick.selection), fixtureId, match, market: pick.market, selection: pick.selection, probability: pick.probability, source: 'model' }} />
-    </div>
-  </div>;
-}
-
-function LineTable({ fixtureId, match, market, lines }: { fixtureId: string; match: string; market: string; lines: LineProbability[] }) {
-  return <div className="fd-lines">
-    <div className="fd-lines-head"><span>Línea</span><span>Más</span><span>Menos</span></div>
-    {lines.map(({ line, over }) => <div className="fd-lines-row" key={line}>
-      <span className="mono">{line}</span>
-      {([['Más', over], ['Menos', 1 - over]] as const).map(([side, probability]) => <span className="fd-lines-cell" key={side}>
-        <em>{pct(probability, 0)}</em>
-        <AddToSlip compact item={{ id: slipItemId(fixtureId, `${market} ${line}`, side), fixtureId, match, market: `${market} ${line}`, selection: `${side} de ${line}`, probability, source: 'model' }} />
-      </span>)}
-    </div>)}
-  </div>;
-}
+const when = (value: string) => formatDate(value, { weekday: 'short', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
 
 function ModelSections({ model, fixtureId, match, home, away }: { model: MatchModel; fixtureId: string; match: string; home: string; away: string }) {
   const { result } = model;
@@ -56,7 +33,7 @@ function ModelSections({ model, fixtureId, match, home, away }: { model: MatchMo
       <div className="fd-triple">
         {picks.map((pick, index) => <div className={`fd-prob ${index === 0 ? 'home' : index === 2 ? 'away' : ''}`} key={pick.selection}>
           <div className="fd-label">{index === 0 ? 'Local' : index === 2 ? 'Visitante' : 'Empate'}</div>
-          <div className="fd-big">{pct(pick.probability)}</div>
+          <div className="fd-big">{formatPct(pick.probability)}</div>
           <div className="fd-bet-sub">{index === 1 ? 'X' : index === 0 ? home : away}</div>
           <div className="fd-bar"><div className="fd-bar-fill" style={{ width: `${pick.probability * 100}%` }} /></div>
           <AddToSlip compact item={{ id: slipItemId(fixtureId, pick.market, pick.selection), fixtureId, match, market: pick.market, selection: pick.selection, probability: pick.probability, source: 'model' }} />
@@ -69,7 +46,7 @@ function ModelSections({ model, fixtureId, match, home, away }: { model: MatchMo
     <section className="fd-card">
       <h2 className="fd-h">Marcadores más probables</h2>
       <div className="fd-scores">{model.topScores.map((score, index) => <div className={`fd-score ${index === 0 ? 'top' : ''}`} key={`${score.home}-${score.away}`}>
-        <div className="fd-score-line">{score.home}-{score.away}</div><div className="fd-bet-sub">{pct(score.probability, 2)}</div>
+        <div className="fd-score-line">{score.home}-{score.away}</div><div className="fd-bet-sub">{formatPct(score.probability, 2)}</div>
       </div>)}</div>
     </section>
 
@@ -95,18 +72,20 @@ function ModelSections({ model, fixtureId, match, home, away }: { model: MatchMo
 
 export default function MatchAnalysisPage() {
   const { fixtureId = '' } = useParams<{ fixtureId: string }>();
-  const { data, isLoading, isError, refetch } = useGetMatchDetail(fixtureId, { query: { enabled: !!fixtureId, queryKey: getGetMatchDetailQueryKey(fixtureId) } });
+  const { data, isLoading, isError, error, refetch } = useGetMatchDetail(fixtureId, { query: { enabled: !!fixtureId, queryKey: getGetMatchDetailQueryKey(fixtureId) } });
   const bets = useGetValueBets();
   const match = data?.match;
   const model = data?.model ?? null;
   const label = match ? `${match.homeTeam} vs ${match.awayTeam}` : '';
   const matchBets = (bets.data ?? []).filter(bet => bet.fixtureId === fixtureId);
   const stats = match?.stats;
+  const notFound = isError && (error as { status?: number } | null)?.status === 404;
 
   return <div className="fd-page">
-    <Link href="/matches" className="fd-back"><ChevronLeft size={15} /> Partidos</Link>
-    {isLoading && <div className="skeleton" style={{ height: 240 }} aria-label="Cargando datos" />}
-    {isError && <div className="notice error" role="alert"><AlertCircle size={16} /><div style={{ flex: 1 }}>No se pudo cargar el partido.</div><button className="button" onClick={() => void refetch()}>Reintentar</button></div>}
+    <Link href="/matches" className="fd-back"><ChevronLeft size={16} aria-hidden="true" /> Partidos</Link>
+    {isLoading && <><SkeletonBlock height={240} /><SkeletonBlock height={160} /></>}
+    {notFound && <section className="fd-card"><EmptyState title="Partido no encontrado" copy="Es posible que el partido ya no esté en seguimiento o que el enlace sea incorrecto." action={<Link href="/matches" className="button primary">Ver partidos</Link>} /></section>}
+    {isError && !notFound && <ErrorNotice message={loadErrorMessage('el partido')} retry={() => { void refetch(); }} />}
     {match && <>
       <section className="fd-card fd-hero">
         <div className="fd-hero-top"><span className="fd-chip">{leagues[match.league] ?? match.league}</span><span className="fd-bet-sub">{when(match.kickoff)}</span></div>
@@ -121,21 +100,23 @@ export default function MatchAnalysisPage() {
             <div className="fd-quality-score">{model.dataQuality.score}<span>/100</span></div>
             <div style={{ flex: 1 }}>
               <div className="fd-quality-title">Calidad de datos · {levelNames[model.dataQuality.level]}</div>
-              <div className="fd-bar"><div className="fd-bar-fill" style={{ width: `${model.dataQuality.score}%` }} /></div>
+              <div className="fd-bar" role="img" aria-label={`Calidad de datos ${model.dataQuality.score} de 100`}><div className="fd-bar-fill" style={{ width: `${model.dataQuality.score}%` }} /></div>
               <div className="fd-bet-sub">Partidos efectivos: {model.dataQuality.homeSample.toFixed(0)} local · {model.dataQuality.awaySample.toFixed(0)} visitante</div>
             </div>
           </div>
         </>}
       </section>
 
-      {match.status === 'scheduled' && !model && <div className="notice"><Info size={15} /><span>Aún no hay datos suficientes de ambos equipos para calcular el modelo. Se activará cuando haya más partidos con estadísticas.</span></div>}
-      {model && <div className="notice"><Info size={15} /><span>Probabilidades del modelo estadístico, sin mezclar con el mercado. Son una estimación, no una certeza: el mercado suele ser más preciso, así que compara siempre con las value bets de abajo.</span></div>}
+      {match.status === 'scheduled' && !model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>Aún no hay datos suficientes de ambos equipos para calcular el modelo. Se activará cuando haya más partidos con estadísticas.</span></div>}
+      {model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>Probabilidades del modelo estadístico, sin mezclar con el mercado. Son una estimación, no una certeza: el mercado suele ser más preciso, así que compara siempre con las value bets de abajo.</span></div>}
 
       {model && <ModelSections model={model} fixtureId={fixtureId} match={label} home={match.homeTeam} away={match.awayTeam} />}
 
       <section className="fd-card">
         <h2 className="fd-h">Value bets de este partido</h2>
-        {bets.isLoading ? <div className="skeleton" style={{ height: 120 }} /> : <BetCards bets={matchBets} showMatch={false} />}
+        {bets.isLoading ? <SkeletonBlock height={120} />
+          : bets.isError ? <ErrorNotice message={loadErrorMessage('las value bets')} retry={() => { void bets.refetch(); }} />
+          : <BetCards bets={matchBets} showMatch={false} />}
       </section>
 
       {match.status !== 'scheduled' && stats && <section className="fd-card">
@@ -152,6 +133,7 @@ export default function MatchAnalysisPage() {
           <td>{odd.marketName}<div className="subline">{odd.selection}{odd.line == null ? '' : ` · ${odd.line}`}{odd.playerName ? ` · ${odd.playerName}` : ''}</div></td>
           <td>{odd.bookmaker}</td><td className="mono">{odd.decimalOdds.toFixed(2)}</td>
         </tr>)}</tbody></table></div> : <div className="fd-bet-sub">Sin cuotas recibidas.</div>}
+        {data.odds.length > 200 && <div className="fd-bet-sub" style={{ marginTop: 8 }}>Se muestran las 200 cuotas más recientes de {data.odds.length}.</div>}
       </details>
     </>}
   </div>;
