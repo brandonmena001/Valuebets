@@ -18,6 +18,8 @@ export type NormalizedOddsQuote = {
   upstreamMarketId: string | null;
   decimalOdds: number;
   sourceUpdatedAt: Date | null;
+  /** Hora de cambio reportada por la casa; null si OddsPapi no la entrega. */
+  bookmakerChangedAt: Date | null;
 };
 
 export type NormalizedOddsEvent = {
@@ -403,7 +405,7 @@ function lineFromSelection(selection: string): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-function extractQuotes(
+export function extractQuotes(
   event: Record<string, unknown>,
   bookmakers: OddsPapiBookmaker[],
   markets: Map<string, OddsPapiMarket>,
@@ -473,6 +475,7 @@ function extractQuotes(
             sourceUpdatedAt:
               parseDate(pricing.changedAt ?? pricing.bookmakerChangedAt) ??
               parseDate(event.updatedAt),
+            bookmakerChangedAt: parseDate(pricing.bookmakerChangedAt),
           };
           const fingerprint = [
             quote.bookmaker,

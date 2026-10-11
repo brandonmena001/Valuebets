@@ -29,6 +29,8 @@ export const oddsQuotesTable = pgTable(
     line: doublePrecision("line"),
     decimalOdds: doublePrecision("decimal_odds").notNull(),
     sourceUpdatedAt: timestamp("source_updated_at", { withTimezone: true }),
+    /** Hora que reporta la propia casa (bookmakerChangedAt de OddsPapi); null si el proveedor no la envía. */
+    bookmakerChangedAt: timestamp("bookmaker_changed_at", { withTimezone: true }),
     capturedAt: timestamp("captured_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

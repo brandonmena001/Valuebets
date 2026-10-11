@@ -570,12 +570,13 @@ export async function persistOddsEvent(event: NormalizedOddsEvent): Promise<numb
           line: quote.line,
           decimalOdds: quote.decimalOdds,
           sourceUpdatedAt: quote.sourceUpdatedAt,
+          bookmakerChangedAt: quote.bookmakerChangedAt,
           capturedAt: new Date(),
           fingerprint: quoteFingerprint(matchId, event, quote),
         })
         .onConflictDoUpdate({
           target: oddsQuotesTable.fingerprint,
-          set: { capturedAt: new Date(), decimalOdds: quote.decimalOdds },
+          set: { capturedAt: new Date(), decimalOdds: quote.decimalOdds, bookmakerChangedAt: quote.bookmakerChangedAt },
         });
       saved += 1;
     } catch (error) {
@@ -587,7 +588,7 @@ export async function persistOddsEvent(event: NormalizedOddsEvent): Promise<numb
           const same = (column: unknown, value: unknown) => sql`${column} is not distinct from ${value}`;
           const updated = await db
             .update(oddsQuotesTable)
-            .set({ decimalOdds: quote.decimalOdds, fingerprint: quoteFingerprint(matchId, event, quote), capturedAt: new Date() })
+            .set({ decimalOdds: quote.decimalOdds, bookmakerChangedAt: quote.bookmakerChangedAt, fingerprint: quoteFingerprint(matchId, event, quote), capturedAt: new Date() })
             .where(
               and(
                 eq(oddsQuotesTable.matchId, matchId),

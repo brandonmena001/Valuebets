@@ -22,3 +22,7 @@ Añadir al comando de tests estándar estos archivos nuevos (están en `artifact
 
 ## 4. Observación fuera de mi zona (modelo)
 En el log real: `Model predictions refreshed` con `predictions: 0`, `history: 1221`, `upcoming: 41`. No investigado (zona del modelo). Conviene revisar por qué no se genera ninguna predicción (¿antigüedad de cuotas > 9 h?, ¿mínimo de partidos por equipo?, ¿marcador de mercados?).
+
+## 5. Para el detector de errores de cuota (zona del modelo/rutas)
+- Para stale-line, usar `coalesce(bookmaker_changed_at, source_updated_at)`. Antes del `db push` y de la primera sincronización nueva, `bookmaker_changed_at` es nulo en todo el historial; `source_updated_at` es la hora de **OddsPapi**, no la de la casa (ver `casas-cobertura.md`).
+- No hay casa aguda en los datos actuales (solo BetPlay y Betano).
