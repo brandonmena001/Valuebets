@@ -16,3 +16,11 @@ Regla (`lib/odds-budget.ts`, probada con tests): por cada partido aún sin cubri
 - Lo que sí es viable: cuotas altas convenientes (value) y cuotas que quedaron desactualizadas respecto a otras casas **en el momento de la captura**, y errores que duren horas.
 - Cada captura trae `changedAt` por cuota (hora del cambio según OddsPapi). Un precio que cambió hace poco se ve aunque la captura sea tardía, así que el cambio reciente de una casa frente a otra sí es observable.
 - Ojo: el endpoint `historical-odds` de OddsPapi (según su documentación: cada cambio de precio con marca de tiempo, datos desde enero 2026, espera de 5 s entre llamadas) permitiría reconstruir **después del partido** qué pasó. **NO verificado** si cuenta contra los 200 y si está en tu plan. Sirve para probar el detector con el pasado, no para detectar en vivo.
+
+---
+## Simulación con tu calendario (reporte del 11-oct, versión anterior del cálculo)
+- Próximos 14 días: 31 partidos -> 11 capturas -> **39 llamadas con 2 casas, 50 con 3** (20 % y 25 % del tope). Intervalo fijo de 8 h: 101 llamadas en 14 días.
+- Últimos 30 días: 24 partidos -> 9 capturas -> 35 llamadas con 2 casas.
+- **Esas cifras están subestimadas**: la base solo conoce partidos que OddsPapi ya devolvió y el colector no guarda eventos de más de 48 h. Mi estimación (NO medida): el calendario completo de las 3 ligas es del orden de 2 veces mayor, así que el gasto real con 2 casas rondaría 70–110 llamadas al mes y con 3 casas 100–160. Sigue dentro de 200, pero con menos holgura.
+- El reporte ya calcula los últimos 30 días con el **historial importado (calendario completo)** y los próximos 14 con `fixtures.csv` + base. Vuelve a correrlo para tener la cifra sin sesgo.
+- Conclusión provisional: un calendario "3 h antes del inicio" cabe con 2 casas, y probablemente con una tercera (Pinnacle) si la sonda confirma que devuelve datos. Sigue sin estar conectado al colector.

@@ -2,7 +2,8 @@
  * Reporte de solo lectura (no escribe nada, no llama a APIs, no gasta cuota).
  * Uso: cd artifacts/api-server && pnpm exec tsx src/lib/odds-report.ts
  */
-import { db, matchesTable, providerCacheTable } from "@workspace/db";
+import { db, historicalResultsTable, matchesTable, providerCacheTable } from "@workspace/db";
+import { fetchUpcomingFixtures } from "../services/football-data";
 import { and, eq, gte, lte, ne, sql } from "drizzle-orm";
 import { fixedIntervalCalls, planCaptures } from "./odds-budget";
 
@@ -45,17 +46,22 @@ async function main() {
   });
   await section("6. GASTO DE CUOTA CON TU CALENDARIO REAL (2 y 3 casas)", async () => {
     const now = new Date();
-    const load = async (from: Date, to: Date) =>
-      (await db.select({ kickoff: matchesTable.kickoff }).from(matchesTable).where(and(gte(matchesTable.kickoff, from), lte(matchesTable.kickoff, to), ne(matchesTable.status, "cancelled")))).map((r) => r.kickoff);
-    for (const [label, from, to, days] of [
-      ["próximos 14 días", now, new Date(now.getTime() + 14 * DAY), 14],
-      ["últimos 30 días (solo partidos que la base conoce)", new Date(now.getTime() - 30 * DAY), now, 30],
+    const past = (await db.select({ kickoff: historicalResultsTable.kickoff }).from(historicalResultsTable).where(and(gte(historicalResultsTable.kickoff, new Date(now.getTime() - 30 * DAY)), lte(historicalResultsTable.kickoff, now)))).map((r) => r.kickoff);
+    const known = (await db.select({ kickoff: matchesTable.kickoff }).from(matchesTable).where(and(gte(matchesTable.kickoff, now), lte(matchesTable.kickoff, new Date(now.getTime() + 14 * DAY)), ne(matchesTable.status, "cancelled")))).map((r) => r.kickoff);
+    const upcoming = await fetchUpcomingFixtures();
+    const horizon = new Date(now.getTime() + 14 * DAY);
+    const fromCsv = upcoming.ok ? upcoming.fixtures.map((f) => f.kickoff).filter((k) => k >= now && k <= horizon) : [];
+    const merged = [...new Map([...known, ...fromCsv].map((k) => [k.getTime(), k])).values()];
+    const lastCsv = fromCsv.length ? new Date(Math.max(...fromCsv.map((k) => k.getTime()))).toISOString() : "sin datos";
+    line(` fixtures.csv: ${upcoming.ok ? `${fromCsv.length} partidos de las 3 ligas (último ${lastCsv})` : `no disponible (${upcoming.error})`}`);
+    for (const [label, kickoffs, days] of [
+      ["próximos 14 días (fixtures.csv + base; el CSV puede no llegar a 14 días)", merged, 14],
+      ["últimos 30 días (historial importado: calendario completo de las 3 ligas)", past, 30],
     ] as const) {
-      const kickoffs = await load(from, to);
       const two = planCaptures(kickoffs, { callsPerCapture: 2 });
       const three = planCaptures(kickoffs, { callsPerCapture: 3 });
       line(` ${label}: ${kickoffs.length} partidos -> ${two.captures.length} capturas`);
-      line(`   2 casas: ${two.calls} llamadas (${Math.round((two.calls / 200) * 100)}% del tope) | 3 casas: ${three.calls} llamadas, sin cubrir ${three.uncovered}`);
+      line(`   2 casas: ${two.calls} llamadas (${Math.round((two.calls / 200) * 100)}% del tope) | 3 casas: ${three.calls} llamadas (${Math.round((three.calls / 200) * 100)}%), sin cubrir ${three.uncovered}`);
       line(`   referencia: intervalo fijo de 8 h en ${days} días = ${fixedIntervalCalls(days, 8)} llamadas`);
     }
   });

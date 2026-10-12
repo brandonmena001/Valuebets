@@ -26,6 +26,16 @@ Categorías presentes: `goals`, `corners`, `cards`, `shots-on-target` y `match-r
 
 ## Reporte de un comando (solo lectura, no gasta cuota)
 ```
-cd artifacts/api-server && pnpm exec tsx src/lib/odds-report.ts
+pnpm --filter @workspace/scripts exec tsx ../artifacts/api-server/src/lib/odds-report.ts
 ```
 Imprime: casas, cobertura por liga y mercado, calidad del reloj, casas agudas en el catálogo guardado y el gasto simulado con tu calendario real.
+
+---
+## Actualización con el reporte real del 11-oct-2026 15:17 UTC (VERIFICADO con tu salida)
+- Casas: BetPlay 30 061 cuotas / 55 partidos; Betano 18 059 / 44 partidos.
+- Cobertura por liga (partidos con cuotas): Bundesliga 18 y 18; Premier 20 y 20; **La Liga BetPlay 17 vs Betano 6** (Betano casi no cubre La Liga).
+- Mercados: goals (15 tipos en ambas), corners (BetPlay 12, Betano 11), cards (BetPlay 7, Betano 11), match-result (1 tipo en ambas), **shots-on-target solo BetPlay (925 cuotas)**.
+- Reloj: media de 19,1 (BetPlay) y 17,4 (Betano) horas de cambio distintas por partido; solo 1 partido de BetPlay y ninguno de Betano tienen una única hora. Es coherente con una hora **por cuota** y no con la hora del evento, pero la cifra se acumula entre capturas y no demuestra por sí sola que sea la hora de la casa.
+- Hora que reporta la casa: **0 de 30 061 y 0 de 18 059**. Esperado: la columna acaba de crearse y el servidor que sincronizó a las 15:17 aún no usaba el código nuevo. Cuando se reinicie con `chat-datos-2` y sincronice, el reporte (sección 4) mostrará el porcentaje real. Si queda en 0, OddsPapi no entrega `bookmakerChangedAt` para estas casas y stale-line solo puede basarse en `changedAt`.
+- Catálogo guardado: **360 casas**. Figuran `pinnacle`, `pinnacle+30`, `pinnacle+5`, `betfair-ex`, `betfair.es`, `betfair.it`, `matchbook`, `sbobet`, `singbet`, `singbet-b`, `singbet-c`. **Que figuren NO prueba que devuelvan cuotas de estas ligas o mercados de jugador con tu clave.**
+- Prueba de 1 llamada (sin guardar nada) para confirmarlo: `pnpm --filter @workspace/scripts exec tsx ../artifacts/api-server/src/lib/odds-probe.ts pinnacle --ejecutar` (sin `--ejecutar` solo simula). Imprime eventos por liga, cuotas por categoría, cuántas traen hora de la casa y antigüedad de `changedAt`. También sirve con `betplay` para saber si esa casa entrega hora propia.
