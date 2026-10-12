@@ -11,6 +11,7 @@ import {
 import { logger } from "../lib/logger";
 import { modelConfig } from "../model/config";
 import { buildPredictions, newDiagnostics, type HistoryMatch, type PlayerGame, type QuoteInput } from "../model/predict";
+import { refreshPriceAnomalies } from "./anomalies";
 import { recordPredictions, settlePredictionLog } from "./prediction-log";
 
 const HORIZON_MS = 10 * 24 * 3_600_000;
@@ -191,4 +192,11 @@ export async function refreshModelPredictions(): Promise<void> {
     { predictions: predictions.length, history: history.length, upcoming: upcoming.length },
     "Model predictions refreshed",
   );
+
+  // Alertas de precio: un fallo aquí nunca debe afectar a las value bets.
+  try {
+    await refreshPriceAnomalies({ history, now });
+  } catch (err) {
+    logger.warn({ err }, "Could not refresh price anomalies");
+  }
 }
