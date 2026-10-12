@@ -191,10 +191,10 @@ function linesAround(mean: number, pmf: number[], count: number): LineProbabilit
   });
 }
 
-type Entry = { quote: QuoteInput; c: ClassifiedQuote };
+export type Entry = { quote: QuoteInput; c: ClassifiedQuote };
 
 /** Solo la cuota más reciente de cada casa y selección. */
-function latestEntries(matchQuotes: QuoteInput[], match: { homeTeam: string; awayTeam: string }): Entry[] {
+export function latestEntries(matchQuotes: QuoteInput[], match: { homeTeam: string; awayTeam: string }): Entry[] {
   const latest = new Map<string, Entry>();
   for (const quote of matchQuotes) {
     const c = classifyQuote(quote, match);
@@ -212,7 +212,7 @@ function latestEntries(matchQuotes: QuoteInput[], match: { homeTeam: string; awa
 }
 
 /** Quita el margen por casa y mercado; devuelve las probabilidades justas de cada casa por mercado. */
-function consensusSamplesOf(entries: Entry[]): Map<string, Map<SelectionKey, number[]>> {
+export function consensusSamplesOf(entries: Entry[]): Map<string, Map<SelectionKey, number[]>> {
   const bookGroups = new Map<string, Entry[]>();
   for (const entry of entries) {
     const key = `${entry.quote.bookmaker}|${entry.c.marketKey}`;
@@ -237,7 +237,7 @@ function consensusSamplesOf(entries: Entry[]): Map<string, Map<SelectionKey, num
 }
 
 /** Consenso (mediana entre casas, renormalizado) de una selección; null si hay pocas casas. */
-function consensusOf(
+export function consensusOf(
   samples: Map<SelectionKey, number[]> | undefined,
   kind: ClassifiedQuote["kind"],
   selectionKey: SelectionKey,
