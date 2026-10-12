@@ -41,6 +41,23 @@ async function main() {
   };
   say("Eventos por liga:", [...new Set(events.map((e) => e.leagueCode))].map((l) => `${l}: ${events.filter((e) => e.leagueCode === l).length}`).join(" | ") || "ninguno");
   say("Cuotas por categoría:", count((q) => q.marketCategory));
+  const own = new Map<string, number>();
+  for (const q of quotes) own.set(q.marketName, (own.get(q.marketName) ?? 0) + 1);
+  const stored = new Map<string, { betplay: number; betano: number }>();
+  const dbRows = (await db.execute(sql`select market_name, bookmaker, count(*)::int n from odds_quotes group by 1,2`)).rows as Array<{ market_name: string; bookmaker: string; n: number }>;
+  for (const r of dbRows) {
+    const entry = stored.get(r.market_name) ?? { betplay: 0, betano: 0 };
+    if (r.bookmaker === "BetPlay") entry.betplay = r.n;
+    if (r.bookmaker === "Betano") entry.betano = r.n;
+    stored.set(r.market_name, entry);
+  }
+  const common = [...own.keys()].filter((name) => (stored.get(name)?.betplay ?? 0) + (stored.get(name)?.betano ?? 0) > 0);
+  say(`\nMercados de ${bookmaker.slug}: ${own.size} tipos; ${common.length} también existen en BetPlay o Betano (${[...own].filter(([n]) => common.includes(n)).reduce((t, [, c]) => t + c, 0)} de ${quotes.length} cuotas)`);
+  say("Top mercados (cuotas de la casa | BetPlay guardadas | Betano guardadas):");
+  for (const [name, count] of [...own].sort((a, b) => b[1] - a[1]).slice(0, 14)) {
+    const other = stored.get(name);
+    say(` ${name}: ${count} | ${other?.betplay ?? 0} | ${other?.betano ?? 0}`);
+  }
   const withHouse = quotes.filter((q) => q.bookmakerChangedAt).length;
   say(`Con hora que reporta la casa (bookmakerChangedAt): ${withHouse} de ${quotes.length}`);
   const ages = quotes.filter((q) => q.sourceUpdatedAt).map((q) => (Date.now() - q.sourceUpdatedAt!.getTime()) / 3_600_000).sort((a, b) => a - b);

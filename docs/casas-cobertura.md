@@ -39,3 +39,11 @@ Imprime: casas, cobertura por liga y mercado, calidad del reloj, casas agudas en
 - Hora que reporta la casa: **0 de 30 061 y 0 de 18 059**. Esperado: la columna acaba de crearse y el servidor que sincronizó a las 15:17 aún no usaba el código nuevo. Cuando se reinicie con `chat-datos-2` y sincronice, el reporte (sección 4) mostrará el porcentaje real. Si queda en 0, OddsPapi no entrega `bookmakerChangedAt` para estas casas y stale-line solo puede basarse en `changedAt`.
 - Catálogo guardado: **360 casas**. Figuran `pinnacle`, `pinnacle+30`, `pinnacle+5`, `betfair-ex`, `betfair.es`, `betfair.it`, `matchbook`, `sbobet`, `singbet`, `singbet-b`, `singbet-c`. **Que figuren NO prueba que devuelvan cuotas de estas ligas o mercados de jugador con tu clave.**
 - Prueba de 1 llamada (sin guardar nada) para confirmarlo: `pnpm --filter @workspace/scripts exec tsx ../artifacts/api-server/src/lib/odds-probe.ts pinnacle --ejecutar` (sin `--ejecutar` solo simula). Imprime eventos por liga, cuotas por categoría, cuántas traen hora de la casa y antigüedad de `changedAt`. También sirve con `betplay` para saber si esa casa entrega hora propia.
+
+---
+## Sonda real de Pinnacle (1 llamada, 11-oct-2026; VERIFICADO con tu salida)
+- **59 eventos** de las 3 ligas (La Liga 22, Premier 21, Bundesliga 16): más partidos que BetPlay (55) y Betano (44).
+- 2 737 cuotas: goals 2 442, match-result 177, corners 72, cards 46. **No trae `shots-on-target`** ni, a la vista, mercados de jugador: no sirve de referencia para la mayor parte del volumen de BetPlay (goleador, tarjetas y tiros por jugador).
+- **Hora que reporta la casa: 2 665 de 2 737 (97 %)**. Para Pinnacle, OddsPapi sí entrega `bookmakerChangedAt`.
+- Antigüedad de `changedAt`: mínima 0,6 h, mediana 4,8 h, máxima 6,8 h. Comparado con la media de ~48 h de BetPlay y ~28 h de Betano, los precios de Pinnacle se mueven con más frecuencia. Causa NO verificada (puede ser actividad real de la casa o cómo OddsPapi refresca esa casa).
+- Pendiente: solape exacto de mercados con BetPlay y Betano (la sonda actualizada lo imprime; cuesta 1 llamada más) y si BetPlay y Betano entregan hora propia (sonda con `betplay` y `betano`, 1 llamada cada una, o esperar una sincronización con el código nuevo, gratis).
