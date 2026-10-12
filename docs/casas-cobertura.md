@@ -47,3 +47,13 @@ Imprime: casas, cobertura por liga y mercado, calidad del reloj, casas agudas en
 - **Hora que reporta la casa: 2 665 de 2 737 (97 %)**. Para Pinnacle, OddsPapi sí entrega `bookmakerChangedAt`.
 - Antigüedad de `changedAt`: mínima 0,6 h, mediana 4,8 h, máxima 6,8 h. Comparado con la media de ~48 h de BetPlay y ~28 h de Betano, los precios de Pinnacle se mueven con más frecuencia. Causa NO verificada (puede ser actividad real de la casa o cómo OddsPapi refresca esa casa).
 - Pendiente: solape exacto de mercados con BetPlay y Betano (la sonda actualizada lo imprime; cuesta 1 llamada más) y si BetPlay y Betano entregan hora propia (sonda con `betplay` y `betano`, 1 llamada cada una, o esperar una sincronización con el código nuevo, gratis).
+
+## Solape de mercados de Pinnacle (segunda llamada real, VERIFICADO con tu salida)
+- Pinnacle tiene **19 tipos de mercado; 18 también existen en BetPlay o Betano** (2 725 de 2 737 cuotas). Los 59 eventos y la hora de la casa (2 665 de 2 737) se repiten.
+- Solape fuerte en: Over/Under de goles (partido, primera mitad, por equipo), resultado final (1X2: 177 cuotas) y primer gol.
+- Solape débil: corners (20 cuotas de Over/Under) y tarjetas (20), con muy pocas líneas; handicaps de corners y tarjetas existen en Pinnacle y Betano pero no en BetPlay.
+- **Sin solape**: goleador, tarjeta de jugador y tiros por jugador (el grueso del volumen de BetPlay).
+- Las cuotas guardadas de BetPlay y Betano acumulan historial de varias capturas; no son comparables 1 a 1 con las 2 737 de una sola llamada.
+
+### Lectura
+Pinnacle sirve como **referencia aguda para goles y 1X2**, que es donde se puede calcular una cuota "justa" y ver si BetPlay o Betano están por encima (valor) o desactualizadas. No sirve para mercados de jugador ni, casi, para corners y tarjetas.

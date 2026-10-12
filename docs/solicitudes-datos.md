@@ -26,3 +26,9 @@ En el log real: `Model predictions refreshed` con `predictions: 0`, `history: 12
 ## 5. Para el detector de errores de cuota (zona del modelo/rutas)
 - Para stale-line, usar `coalesce(bookmaker_changed_at, source_updated_at)`. Antes del `db push` y de la primera sincronización nueva, `bookmaker_changed_at` es nulo en todo el historial; `source_updated_at` es la hora de **OddsPapi**, no la de la casa (ver `casas-cobertura.md`).
 - No hay casa aguda en los datos actuales (solo BetPlay y Betano).
+
+## 6. Si se activa Pinnacle como tercera casa (decisión del usuario; NO implementado)
+Hay que coordinar antes con modelo/rutas/interfaz (zonas ajenas), porque hoy todas las casas de `odds_quotes` se tratan igual:
+- Pinnacle es **referencia, no una casa donde apostar**: `value-model.ts` y `routes/**` no deben ofrecerla como "mejor cuota" ni recomendar apostar en ella. Hace falta un criterio explícito (p. ej. lista de casas de referencia o columna) y que el detector la use solo para calcular la cuota justa.
+- En el colector (mi zona) el cambio sería: añadir `pinnacle` a las casas seleccionadas y subir `ODDS_CALLS_PER_SYNC` de 2 a 3 en `lib/odds-plan.ts`. Costo: +1 llamada por captura (≈100–160 llamadas/mes con calendario por partidos; estimación mía, NO medida).
+- Quedan ~70 llamadas este mes (cuota 129/200 el 11-oct): conviene activarla al iniciar el nuevo periodo o solo en las capturas previas a partidos.
