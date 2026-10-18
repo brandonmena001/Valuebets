@@ -107,12 +107,16 @@ function defaultLimit(provider: ProviderName): number {
 }
 
 /** Publica en Fuentes el resultado de la importación de football-data.co.uk (no usa clave ni cuota). */
-export async function recordFootballDataStatus(history: { rows: number; errors: string[]; skipped: boolean }): Promise<void> {
+export async function recordFootballDataStatus(history: { rows: number; errors: string[]; skipped: boolean; unchanged?: number }): Promise<void> {
   if (history.skipped) return; // limitada por frecuencia: se conserva el estado anterior
   const now = new Date();
-  const state = history.rows > 0 ? (history.errors.length ? "partial" : "ok") : "error";
+  const unchanged = history.unchanged ?? 0;
+  const ok = history.rows > 0 || (unchanged > 0 && history.errors.length === 0);
+  const state = ok ? (history.errors.length ? "partial" : "ok") : "error";
   const message =
-    history.rows > 0
+    history.rows === 0 && unchanged > 0 && history.errors.length === 0
+      ? `Sin cambios desde la última descarga (${unchanged} archivos al día).`
+      : history.rows > 0
       ? `${history.rows} resultados importados${history.errors.length ? `; con avisos: ${history.errors.slice(0, 2).join(" | ")}` : ""}.`
       : `No se importó ningún resultado${history.errors.length ? `: ${history.errors.slice(0, 2).join(" | ")}` : ""}.`;
   const values = {
@@ -120,7 +124,7 @@ export async function recordFootballDataStatus(history: { rows: number; errors: 
     lastAttemptAt: now,
     recordsCollected: history.rows,
     message: message.slice(0, 300),
-    ...(history.rows > 0 ? { lastSuccessAt: now } : {}),
+    ...(ok ? { lastSuccessAt: now } : {}),
   };
   await db
     .insert(sourceStatusTable)

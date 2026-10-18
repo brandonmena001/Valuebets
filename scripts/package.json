@@ -6,6 +6,7 @@
   "scripts": {
     "hello": "tsx ./src/hello.ts",
     "backtest": "tsx ./src/backtest.ts",
+    "gate": "tsx ./src/gate-backtest.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {

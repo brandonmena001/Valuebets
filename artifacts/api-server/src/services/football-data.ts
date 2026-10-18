@@ -15,8 +15,15 @@ const LEAGUE_FILES: Record<string, string> = {
   "la-liga": "SP1",
   bundesliga: "D1",
 };
-const MIN_INTERVAL_MS = 3 * 60 * 60 * 1000;
+// football-data.co.uk actualiza sus CSV martes y viernes y ya nos devolvió un 429: descargar poco y con cortesía.
+const MIN_INTERVAL_MS = 12 * 60 * 60 * 1000;
+const MIN_FORCED_INTERVAL_MS = 30 * 60 * 1000;
+const PAUSE_BETWEEN_FILES_MS = 2500;
+const USER_AGENT = "Valuebets/1.0 (uso personal sin fines comerciales; https://github.com/brandonmena001/Valuebets)";
 let lastImportAt = 0;
+/** Fecha de Last-Modified por URL para pedir solo lo que cambió (se reinicia con el servidor). */
+const lastModifiedByUrl = new Map<string, string>();
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function upsert(rows: ParsedResult[]): Promise<void> {
   for (let i = 0; i < rows.length; i += 200) {
@@ -44,24 +51,46 @@ async function upsert(rows: ParsedResult[]): Promise<void> {
  */
 export async function importFootballData(
   options: { force?: boolean; now?: Date } = {},
-): Promise<{ rows: number; errors: string[]; skipped: boolean }> {
+): Promise<{ rows: number; errors: string[]; skipped: boolean; unchanged: number }> {
   const now = options.now ?? new Date();
-  if (!options.force && Date.now() - lastImportAt < MIN_INTERVAL_MS) {
-    return { rows: 0, errors: [], skipped: true };
+  const minInterval = options.force ? MIN_FORCED_INTERVAL_MS : MIN_INTERVAL_MS;
+  if (Date.now() - lastImportAt < minInterval) {
+    return { rows: 0, errors: [], skipped: true, unchanged: 0 };
   }
   lastImportAt = Date.now();
   const start = currentSeasonStartYear(now);
   const errors: string[] = [];
   let total = 0;
+  let unchanged = 0;
+  let requests = 0;
+  let blocked = false;
   for (const [league, file] of Object.entries(LEAGUE_FILES)) {
     for (const season of [seasonCode(start), seasonCode(start - 1)]) {
-      const url = `https://www.football-data.co.uk/mmz4281/${season}/${file}.csv`;
+      if (blocked) break;
+      const url = `${process.env.FOOTBALL_DATA_BASE_URL ?? "https://www.football-data.co.uk"}/mmz4281/${season}/${file}.csv`;
       try {
-        const response = await fetch(url, { signal: AbortSignal.timeout(25_000) });
+        if (requests > 0) await sleep(PAUSE_BETWEEN_FILES_MS);
+        requests += 1;
+        const headers: Record<string, string> = { "User-Agent": USER_AGENT };
+        const known = lastModifiedByUrl.get(url);
+        if (known) headers["If-Modified-Since"] = known;
+        const response = await fetch(url, { headers, signal: AbortSignal.timeout(25_000) });
+        if (response.status === 304) {
+          unchanged += 1;
+          continue;
+        }
+        if (response.status === 429 || response.status === 403 || response.status >= 500) {
+          // El sitio pide pausa: no se insiste hasta el próximo ciclo (12 h).
+          errors.push(`${league} ${season}: HTTP ${response.status} (el sitio pidió pausa; se detiene la importación)`);
+          blocked = true;
+          continue;
+        }
         if (!response.ok) {
           errors.push(`${league} ${season}: HTTP ${response.status}`);
           continue;
         }
+        const modified = response.headers.get("last-modified");
+        if (modified) lastModifiedByUrl.set(url, modified);
         const rows = parseFootballDataCsv(await response.text(), league, season);
         if (!rows.length) {
           errors.push(`${league} ${season}: sin filas reconocibles`);
@@ -74,8 +103,8 @@ export async function importFootballData(
       }
     }
   }
-  logger.info({ rows: total, errors }, "football-data history import finished");
-  return { rows: total, errors, skipped: false };
+  logger.info({ rows: total, unchanged, errors }, "football-data history import finished");
+  return { rows: total, errors, skipped: false, unchanged };
 }
 
 const DIV_TO_LEAGUE: Record<string, string> = { E0: "premier-league", SP1: "la-liga", D1: "bundesliga" };
