@@ -13,3 +13,13 @@
 **Congelado hasta la compuerta:** detector de errores de cuota, props de jugador, xG de Understat, lesiones, ligas extra.
 
 **Veredictos posibles** (los calcula `scripts/src/gate-lib.ts`): «ventaja demostrada» (la mezcla supera a Pinnacle de cierre en log-loss con IC95 % por debajo de 0), «utilidad como filtro» (CLV medio positivo con IC95 % por encima de 0, mínimo 200 apuestas) o «sin ventaja demostrada».
+
+## Cómo ejecutar la compuerta (en el Shell de Replit)
+```
+pnpm --filter @workspace/scripts run gate
+```
+Descarga con cortesía los CSV de football-data.co.uk (caché de 12 h en `scripts/.cache`, `If-Modified-Since`, 2,5 s entre peticiones, parada ante 429), hace el backtest walk-forward del 1X2 contra la cuota de cierre de Pinnacle sin margen, simula el CLV de apostar a la cuota previa de Bet365 y escribe `docs/resultado-backtest.md`.
+
+Opciones: `--leagues=E0,SP1,D1,I1,F1` (o `all-main`), `--seasons=2627,2526,2425,2324`, `--offline` (solo caché), `--step-days=7`, `--out=ruta.md`. También acepta carpetas con CSV propios: `... run gate -- ./mis-csv`.
+
+Tarda unos minutos (las pausas entre descargas son deliberadas).
