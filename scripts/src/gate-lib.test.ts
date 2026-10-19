@@ -117,4 +117,12 @@ describe("compuerta: veredictos con mercados simulados", () => {
     if (s.bets > 0) assert.ok(s.clv.mean < 0.01, `CLV medio ${s.clv.mean}`);
     assert.ok(result.quality.blendMinusBench.mean > -0.002, "no debe ganarle al referente que es la verdad");
   });
+
+  it("con pocos partidos evaluados NO emite veredicto («datos insuficientes»)", () => {
+    const rows = simulate(31, "P1", "soft").filter((r) => r.season === "0" || r.season === "1");
+    const result = evaluate(walkForward(rows, { stepDays: 14 }));
+    assert.ok(result.matches < 1000, `partidos: ${result.matches}`);
+    assert.equal(result.verdict, "datos insuficientes");
+    assert.match(result.verdictReasons.join(" "), /NO es un veredicto/);
+  });
 });

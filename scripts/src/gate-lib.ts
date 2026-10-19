@@ -208,11 +208,13 @@ export type GateResult = {
   };
   scenarios: { b365: ScenarioResult; max: ScenarioResult };
   calibration: Array<{ bin: string; n: number; predicted: number; observed: number }>;
-  verdict: "ventaja demostrada" | "utilidad como filtro" | "sin ventaja demostrada";
+  verdict: "ventaja demostrada" | "utilidad como filtro" | "sin ventaja demostrada" | "datos insuficientes";
   verdictReasons: string[];
 };
 
 const MIN_BETS_FOR_VERDICT = 200;
+/** Por debajo de esto no se emite veredicto: con pocos partidos «sin ventaja» sería una conclusión falsa. */
+const MIN_MATCHES_FOR_VERDICT = 1000;
 
 function simulateBets(preds: Prediction[], source: "b365" | "max", useModel: boolean): BetStats {
   const cfg = modelConfig;
@@ -284,6 +286,19 @@ export function evaluate(preds: Prediction[]): GateResult {
   const reasons: string[] = [];
   let verdict: GateResult["verdict"] = "sin ventaja demostrada";
   const q = quality.blendMinusBench;
+  if (preds.length < MIN_MATCHES_FOR_VERDICT) {
+    return {
+      matches: preds.length,
+      leagues: [...new Set(preds.map((p) => p.league))].sort(),
+      pinnacleShare: preds.length ? preds.filter((p) => p.benchSource === "pinnacle").length / preds.length : 0,
+      quality, scenarios, calibration,
+      verdict: "datos insuficientes",
+      verdictReasons: [
+        `Solo ${preds.length} partidos evaluados (mínimo ${MIN_MATCHES_FOR_VERDICT}). Esto NO es un veredicto: faltan datos, no hay evidencia a favor ni en contra del modelo.`,
+        "Causas habituales: descargas incompletas (revisa la lista de archivos) o pocas temporadas (el modelo necesita unos 300 días de historia antes de predecir).",
+      ],
+    };
+  }
   if (preds.length < 1500) reasons.push(`Muestra pequeña (${preds.length} partidos): cualquier conclusión es frágil.`);
   if (Number.isFinite(q.hi) && q.hi < 0) {
     verdict = "ventaja demostrada";

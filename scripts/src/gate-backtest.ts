@@ -28,35 +28,52 @@ const positional = args.filter((a) => !a.startsWith("--"));
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-type State = { blocked: boolean; requests: number };
+type State = { blocked: boolean; requests: number; consecutiveFailures: number };
 
+const TIMEOUT_MS = Number(process.env.GATE_TIMEOUT_MS ?? 60_000);
+const RETRY_WAITS = (process.env.GATE_RETRY_WAIT_MS ?? "8000,20000").split(",").map(Number);
+const PAUSE = Number(process.env.GATE_PAUSE_MS ?? PAUSE_MS);
+
+/**
+ * Descarga un archivo con cortesía. Solo un 429/403/5xx detiene TODAS las descargas (el sitio pidió
+ * pausa). Un timeout o un fallo de red es transitorio: se reintenta con espera creciente y, si sigue
+ * fallando, solo se omite ESE archivo; tres archivos seguidos fallidos sí detienen el resto.
+ */
 async function download(url: string, file: string, state: State): Promise<string> {
   const exists = fs.existsSync(file);
   if (exists && Date.now() - fs.statSync(file).mtimeMs < CACHE_TTL_MS) return "caché";
-  if (state.blocked) return exists ? "caché (sitio bloqueó)" : "omitido (sitio bloqueó)";
-  if (state.requests > 0) await sleep(PAUSE_MS);
+  if (state.blocked) return exists ? "caché (descargas detenidas)" : "omitido (descargas detenidas)";
+  if (state.requests > 0) await sleep(PAUSE);
   state.requests += 1;
   const headers: Record<string, string> = { "User-Agent": UA };
   if (exists) headers["If-Modified-Since"] = fs.statSync(file).mtime.toUTCString();
-  try {
-    const res = await fetch(url, { headers, signal: AbortSignal.timeout(30_000) });
-    if (res.status === 304) {
-      fs.utimesSync(file, new Date(), new Date());
-      return "sin cambios";
+  let lastError = "desconocido";
+  for (let attempt = 0; attempt <= RETRY_WAITS.length; attempt += 1) {
+    if (attempt > 0) await sleep(RETRY_WAITS[attempt - 1]!);
+    try {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+      state.consecutiveFailures = 0;
+      if (res.status === 304) {
+        fs.utimesSync(file, new Date(), new Date());
+        return "sin cambios";
+      }
+      if (res.status === 404) return "no existe";
+      if (res.status === 429 || res.status === 403 || res.status >= 500) {
+        state.blocked = true;
+        return `HTTP ${res.status}: el sitio pidió pausa, detengo las descargas`;
+      }
+      if (!res.ok) return `HTTP ${res.status}`;
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.writeFileSync(file, await res.text());
+      return attempt > 0 ? `descargado (a la ${attempt + 1}ª)` : "descargado";
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : "desconocido";
     }
-    if (res.status === 404) return "no existe";
-    if (res.status === 429 || res.status === 403 || res.status >= 500) {
-      state.blocked = true;
-      return `HTTP ${res.status}: detengo las descargas y uso la caché`;
-    }
-    if (!res.ok) return `HTTP ${res.status}`;
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, await res.text());
-    return "descargado";
-  } catch (error) {
-    state.blocked = true;
-    return `error de red (${error instanceof Error ? error.message : "desconocido"}): uso la caché`;
   }
+  state.consecutiveFailures += 1;
+  if (state.consecutiveFailures >= 3) state.blocked = true;
+  const suffix = exists ? "uso la caché" : "omitido";
+  return `falló tras ${RETRY_WAITS.length + 1} intentos (${lastError}): ${suffix}${state.blocked ? "; 3 fallos seguidos, detengo las descargas" : ""}`;
 }
 
 async function main() {
@@ -87,16 +104,19 @@ async function main() {
     const seasons = (flag("seasons") ?? [0, 1, 2, 3].map((i) => seasonCode(start - i)).join(",")).split(",");
     const leagueArg = flag("leagues") ?? "E0,SP1,D1,I1,F1";
     const leagues = (leagueArg === "all-main" ? MAIN : leagueArg).split(",");
-    const state: State = { blocked: false, requests: 0 };
+    const state: State = { blocked: false, requests: 0, consecutiveFailures: 0 };
+    let expected = 0;
     for (const league of leagues) {
       for (const season of seasons) {
         const file = path.join(cache, season, `${league}.csv`);
         const url = `${BASE_URL}/mmz4281/${season}/${league}.csv`;
+        expected += 1;
         const status = has("offline") ? (fs.existsSync(file) ? "caché" : "omitido (--offline)") : await download(url, file, state);
         const n = fs.existsSync(file) ? readFile(file, league, season) : 0;
         console.log(`${league} ${season}: ${status}${n ? ` · ${n} partidos` : ""}`);
       }
     }
+    console.log(`\nArchivos con datos: ${files} de ${expected}.${files < expected ? " Faltan archivos: vuelve a correr el comando; lo ya descargado queda en caché y continúa donde se quedó." : ""}`);
   }
 
   if (!rows.length) {
@@ -115,6 +135,7 @@ async function main() {
   console.log(`\nVEREDICTO: ${result.verdict}`);
   for (const reason of result.verdictReasons) console.log(`- ${reason}`);
   console.log(`\nInforme completo: ${out}`);
+  if (result.verdict === "datos insuficientes") process.exit(2);
 }
 
 main().catch((error) => {

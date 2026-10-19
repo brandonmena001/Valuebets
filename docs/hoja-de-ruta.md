@@ -23,3 +23,5 @@ Descarga con cortesía los CSV de football-data.co.uk (caché de 12 h en `script
 Opciones: `--leagues=E0,SP1,D1,I1,F1` (o `all-main`), `--seasons=2627,2526,2425,2324`, `--offline` (solo caché), `--step-days=7`, `--out=ruta.md`. También acepta carpetas con CSV propios: `... run gate -- ./mis-csv`.
 
 Tarda unos minutos (las pausas entre descargas son deliberadas).
+
+**Si la descarga se corta:** el comando reintenta cada archivo (hasta 3 veces, con espera creciente) y solo omite los que fallan; con un 429/403/5xx o tres fallos seguidos detiene el resto. Lo ya descargado queda en `scripts/.cache` (12 h), así que basta volver a correr el comando para continuar. Con menos de 1000 partidos evaluados el veredicto es «datos insuficientes» (no es un resultado).
