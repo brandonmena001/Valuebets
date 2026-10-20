@@ -13,7 +13,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { currentSeasonStartYear, seasonCode } from "../../artifacts/api-server/src/services/football-data-parse";
-import { evaluate, readRows, renderReport, walkForward, type Row } from "./gate-lib";
+import { evaluate, readRows, referenceBacktest, renderReport, walkForward, type Row } from "./gate-lib";
 
 const BASE_URL = process.env.FOOTBALL_DATA_BASE_URL ?? "https://football-data.co.uk";
 const UA = "Valuebets-research/1.0 (uso personal sin fines comerciales; https://github.com/brandonmena001/Valuebets)";
@@ -128,12 +128,15 @@ async function main() {
   console.log(`\nEjecutando walk-forward sobre ${rows.length} partidos (paso ${stepDays} días)…`);
   const preds = walkForward(rows, { stepDays, burnInDays });
   const result = evaluate(preds);
-  const report = renderReport(result, { generatedAt: new Date().toISOString(), files });
+  const reference = referenceBacktest(rows);
+  const report = renderReport(result, { generatedAt: new Date().toISOString(), files }, reference);
   const out = path.resolve(flag("out") ?? "../docs/resultado-backtest.md");
   fs.mkdirSync(path.dirname(out), { recursive: true });
   fs.writeFileSync(out, report);
   console.log(`\nVEREDICTO: ${result.verdict}`);
   for (const reason of result.verdictReasons) console.log(`- ${reason}`);
+  console.log(`\nMODO REFERENCIA (comparar casas entre sí, sin modelo): ${reference.headline.verdict}`);
+  console.log(`- ${reference.headline.reason}`);
   console.log(`\nInforme completo: ${out}`);
   if (result.verdict === "datos insuficientes") process.exit(2);
 }

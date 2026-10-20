@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { resultProbs, scoreMatrix } from "../../artifacts/api-server/src/model/strength";
-import { bootstrapMean, evaluate, readRows, walkForward, type Row } from "./gate-lib";
+import { bootstrapMean, detectBooks, evaluate, readRows, referenceBacktest, renderReport, walkForward, type Row } from "./gate-lib";
 
 function rng(seed: number) {
   let a = seed >>> 0;
@@ -51,6 +51,13 @@ function simulate(seed: number, league: string, world: World, softNoise = 0.1): 
         pinClose: odds(truth, 0.025), b365Pre: b365Odds, avgPre: avgOdds,
         maxPre: b365Odds.map((x, k) => Math.max(x, avgOdds[k]! * 1.02)) as [number, number, number],
         avgClose: odds(truth, 0.04),
+        books: {
+          B365: b365Odds,
+          BW: odds(world === "soft" ? noisy(0.03) : truth, 0.05),
+          WH: odds(world === "soft" ? noisy(0.03) : truth, 0.055),
+          PS: odds(world === "soft" ? noisy(0.01) : truth, 0.03),
+          VC: odds(world === "soft" ? noisy(0.03) : truth, 0.06),
+        },
       });
     });
   }
@@ -124,5 +131,40 @@ describe("compuerta: veredictos con mercados simulados", () => {
     assert.ok(result.matches < 1000, `partidos: ${result.matches}`);
     assert.equal(result.verdict, "datos insuficientes");
     assert.match(result.verdictReasons.join(" "), /NO es un veredicto/);
+  });
+
+  it("modo referencia: con una casa blanda errática, el mejor precio frente al consenso tiene CLV > 0", () => {
+    const rows = [...simulate(51, "R1", "soft"), ...simulate(52, "R2", "soft")];
+    const ref = referenceBacktest(rows);
+    const h = ref.sweep.find((x) => x.threshold === 4)!;
+    assert.ok(ref.matches > 1500, `partidos: ${ref.matches}`);
+    assert.ok(h.bets > 100, `apuestas al 4 %: ${h.bets}`);
+    assert.ok(h.clv.lo > 0, JSON.stringify(h.clv));
+    // más umbral = menos apuestas
+    assert.ok(ref.sweep[0]!.bets >= ref.sweep.at(-1)!.bets);
+    // la casa errática (B365) debe ser la que más veces da el mejor precio seleccionado
+    assert.equal(ref.perBook[0]!.book, "B365");
+  });
+
+  it("modo referencia: con mercado eficiente no hay señal de precio", () => {
+    const rows = [...simulate(61, "R3", "efficient"), ...simulate(62, "R4", "efficient")];
+    const ref = referenceBacktest(rows);
+    assert.notEqual(ref.headline.verdict, "señal de precio con CLV positivo", ref.headline.reason);
+    assert.ok(ref.bestPriceAll.clv.mean < 0.02, `CLV del mejor precio sin filtro ${ref.bestPriceAll.clv.mean}`);
+  });
+
+  it("el informe incluye la referencia «todas las selecciones» y la sección del modo referencia", () => {
+    const rows = [...simulate(71, "R5", "efficient"), ...simulate(72, "R6", "efficient")];
+    const result = evaluate(walkForward(rows, { stepDays: 14 }));
+    const report = renderReport(result, { generatedAt: "test", files: 2 }, referenceBacktest(rows));
+    assert.match(report, /todas las selecciones \(sin filtro\)/);
+    assert.match(report, /Modo referencia: comparar las casas entre sí/);
+    assert.match(report, /Umbral de valor/);
+  });
+
+  it("detectBooks: separa casas de agregados y cierres", () => {
+    const header = ["Div", "B365H", "B365D", "B365A", "BWH", "BWD", "BWA", "PSH", "PSD", "PSA", "VCH", "VCD", "VCA",
+      "MaxH", "MaxD", "MaxA", "AvgH", "AvgD", "AvgA", "B365CH", "B365CD", "B365CA", "PSCH", "PSCD", "PSCA", "AvgCH", "AvgCD", "AvgCA", "BbMxH", "BbMxD", "BbMxA"];
+    assert.deepEqual(detectBooks(header).map((b) => b.name), ["B365", "BW", "PS", "VC"]);
   });
 });
