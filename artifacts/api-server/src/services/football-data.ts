@@ -67,7 +67,7 @@ export async function importFootballData(
   for (const [league, file] of Object.entries(LEAGUE_FILES)) {
     for (const season of [seasonCode(start), seasonCode(start - 1)]) {
       if (blocked) break;
-      const url = `${process.env.FOOTBALL_DATA_BASE_URL ?? "https://www.football-data.co.uk"}/mmz4281/${season}/${file}.csv`;
+      const url = `${process.env.FOOTBALL_DATA_BASE_URL ?? "https://football-data.co.uk"}/mmz4281/${season}/${file}.csv`;
       try {
         if (requests > 0) await sleep(PAUSE_BETWEEN_FILES_MS);
         requests += 1;
@@ -121,7 +121,7 @@ export async function fetchUpcomingFixtures(): Promise<{ ok: boolean; fixtures: 
     return { ok: true, fixtures: fixturesCache.fixtures };
   }
   try {
-    const response = await fetch("https://www.football-data.co.uk/fixtures.csv", { signal: AbortSignal.timeout(25_000) });
+    const response = await fetch("https://football-data.co.uk/fixtures.csv", { signal: AbortSignal.timeout(25_000) });
     if (!response.ok) return { ok: false, fixtures: [], error: `fixtures.csv: HTTP ${response.status}` };
     const fixtures = parseFootballDataFixtures(await response.text(), DIV_TO_LEAGUE);
     fixturesCache = { loadedAt: Date.now(), fixtures };

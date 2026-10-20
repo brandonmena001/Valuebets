@@ -15,7 +15,7 @@ import path from "node:path";
 import { currentSeasonStartYear, seasonCode } from "../../artifacts/api-server/src/services/football-data-parse";
 import { evaluate, readRows, renderReport, walkForward, type Row } from "./gate-lib";
 
-const BASE_URL = process.env.FOOTBALL_DATA_BASE_URL ?? "https://www.football-data.co.uk";
+const BASE_URL = process.env.FOOTBALL_DATA_BASE_URL ?? "https://football-data.co.uk";
 const UA = "Valuebets-research/1.0 (uso personal sin fines comerciales; https://github.com/brandonmena001/Valuebets)";
 const CACHE_TTL_MS = 12 * 3_600_000;
 const PAUSE_MS = 2500;
