@@ -39,6 +39,11 @@ import { describeError, pgErrorInfo } from "../lib/error-detail";
 import { findUnmatchedTeams } from "../lib/team-coverage";
 import { fetchUpcomingFixtures, importFootballData } from "./football-data";
 import {
+  reconcilePastMatches,
+  syncFootballDataFixtures,
+  teamsMatchToReference,
+} from "./match-reconciliation";
+import {
   ODDS_FAR_HOURS,
   ODDS_MIN_GAP_MS,
   paceGapMs,
@@ -340,12 +345,19 @@ async function saveOddsMatch(event: NormalizedOddsEvent): Promise<number> {
           lte(matchesTable.kickoff, end),
         ),
       );
-    const home = normalizeTeam(event.homeTeam);
-    const away = normalizeTeam(event.awayTeam);
+    const knownNames = candidates.flatMap((candidate) => [
+      candidate.homeTeam,
+      candidate.awayTeam,
+    ]);
     matched = candidates.find(
       (candidate) =>
-        normalizeTeam(candidate.homeTeam) === home &&
-        normalizeTeam(candidate.awayTeam) === away,
+        teamsMatchToReference(
+          event.homeTeam,
+          event.awayTeam,
+          candidate.homeTeam,
+          candidate.awayTeam,
+          knownNames,
+        ),
     );
   }
 
@@ -705,10 +717,40 @@ async function loadOddsReferenceData(): Promise<NonNullable<typeof oddsReference
 async function loadOddsCalendar(now: Date): Promise<{ calendar: CalendarMatch[]; known: boolean; error?: string }> {
   const calendar: CalendarMatch[] = [];
   let known = false;
+  let calendarError: string | undefined;
   const upcoming = await fetchUpcomingFixtures();
   if (upcoming.ok) {
-    known = true;
-    calendar.push(...upcoming.fixtures.map(({ leagueCode, kickoff }) => ({ leagueCode, kickoff })));
+    const targetFixtures = upcoming.fixtures.filter(
+      (fixture) =>
+        apiFootballLeagues.some((league) => league.code === fixture.leagueCode) &&
+        fixture.kickoff.getTime() >= now.getTime() - 2 * 3_600_000,
+    );
+    if (targetFixtures.length) {
+      known = true;
+      calendar.push(
+        ...targetFixtures.map(({ leagueCode, kickoff }) => ({ leagueCode, kickoff })),
+      );
+      try {
+        const imported = await syncFootballDataFixtures(targetFixtures, now);
+        if (imported.inserted || imported.updated) {
+          logger.info(
+            { source: "football-data", ...imported },
+            "Upcoming fixtures synchronized",
+          );
+        }
+      } catch (error) {
+        calendarError = describeError(error);
+        logger.warn(
+          { source: "football-data", detail: calendarError },
+          "Upcoming fixtures could not be synchronized",
+        );
+      }
+    } else {
+      calendarError =
+        "fixtures.csv no devolvió próximos partidos de las ligas configuradas";
+    }
+  } else {
+    calendarError = upcoming.error;
   }
   try {
     const rows = await db
@@ -726,7 +768,7 @@ async function loadOddsCalendar(now: Date): Promise<{ calendar: CalendarMatch[];
   } catch (error) {
     return { calendar, known, error: describeError(error) };
   }
-  return { calendar, known, error: upcoming.error };
+  return { calendar, known, error: calendarError };
 }
 
 /** Cuotas idénticas a las de la última sincronización: un solo UPDATE de capturedAt en vez de N inserts. */
@@ -1107,6 +1149,15 @@ async function runSync(options: SyncOptions): Promise<void> {
     await recordFootballDataStatus(history).catch((error) =>
       logger.warn({ detail: describeError(error) }, "Could not record football-data status"),
     );
+    try {
+      const reconciliation = await reconcilePastMatches();
+      logger.info(reconciliation, "Past matches reconciled");
+    } catch (error) {
+      logger.warn(
+        { detail: describeError(error) },
+        "Past matches could not be reconciled",
+      );
+    }
   }
   if (useOddsPapi && wantOdds) {
     await runProviderTask("oddspapi", "cuotas", async () => {
@@ -1189,7 +1240,7 @@ export function getNextScheduledSyncAt(): Date {
 }
 
 export const syncScheduleDescription =
-  "Fixtures y estadísticas cada 6 h (máximo 80 llamadas locales/día); cuotas cada 8 h solo si hay partidos en las próximas 24 h (entre 24 y 48 h, una vez al día; sin partidos, sin llamadas; máximo 200 llamadas locales/mes).";
+  "Fixtures y estadísticas cada 6 h (máximo 80 llamadas locales/día); cuotas cada 8 h con partidos en 24 h, una vez al día entre 24 h y 10 días, y descubrimiento diario si el calendario público no cubre las ligas; máximo 200 llamadas locales/mes.";
 
 export function startCollector(): void {
   if (schedulerStarted) return;

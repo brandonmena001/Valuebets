@@ -1,0 +1,1 @@
+- [Public fixture-feed coverage](football-data-fixture-coverage.md) — an empty supported-league slice is unknown, not proof there are no upcoming matches.

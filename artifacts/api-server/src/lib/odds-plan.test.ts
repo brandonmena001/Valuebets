@@ -9,17 +9,17 @@ const at = (hours: number, leagueCode: string) => ({ leagueCode, kickoff: new Da
 const base = { allLeagues: L, now: NOW, lastFetchAt: 0, lastDiscoveryAt: 0, scheduled: true, calendarKnown: true };
 
 describe("planOddsFetch", () => {
-  it("consulta solo las ligas con partidos en 48 h", () => {
-    const plan = planOddsFetch({ ...base, calendar: [at(5, "bundesliga"), at(30, "la-liga"), at(100, "premier-league")] });
+  it("consulta solo las ligas con partidos en 10 días", () => {
+    const plan = planOddsFetch({ ...base, calendar: [at(5, "bundesliga"), at(30, "la-liga"), at(100, "premier-league"), at(250, "la-liga")] });
     assert.equal(plan.fetch, true);
-    assert.deepEqual(plan.leagues, ["la-liga", "bundesliga"]);
-    assert.deepEqual([plan.near, plan.far], [1, 1]);
+    assert.deepEqual(plan.leagues, ["premier-league", "la-liga", "bundesliga"]);
+    assert.deepEqual([plan.near, plan.far], [1, 2]);
   });
   it("no gasta llamadas si no hay partidos y el calendario es conocido", () => {
-    const plan = planOddsFetch({ ...base, calendar: [at(72, "la-liga")] });
+    const plan = planOddsFetch({ ...base, calendar: [at(250, "la-liga")] });
     assert.deepEqual([plan.fetch, plan.leagues], [false, []]);
   });
-  it("solo 24-48 h: una vez cada 24 h en programadas, siempre en manuales", () => {
+  it("solo 24 h a 10 días: una vez al día en programadas, siempre en manuales", () => {
     const calendar = [at(30, "la-liga")];
     assert.equal(planOddsFetch({ ...base, calendar, lastFetchAt: NOW.getTime() - 8 * H }).fetch, false);
     assert.equal(planOddsFetch({ ...base, calendar, lastFetchAt: NOW.getTime() - 25 * H }).fetch, true);
