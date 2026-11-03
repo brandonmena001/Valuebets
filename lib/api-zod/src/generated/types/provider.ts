@@ -13,4 +13,5 @@ export const Provider = {
   'api-football': 'api-football',
   oddspapi: 'oddspapi',
   'football-data': 'football-data',
+  openfootball: 'openfootball',
 } as const;

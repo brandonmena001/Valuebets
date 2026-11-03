@@ -16,6 +16,7 @@ export const LeagueCode = {
   'premier-league': 'premier-league',
   'la-liga': 'la-liga',
   bundesliga: 'bundesliga',
+  'champions-league': 'champions-league',
 } as const;
 
 export type MarketCategory = typeof MarketCategory[keyof typeof MarketCategory];
@@ -36,6 +37,7 @@ export const Provider = {
   'api-football': 'api-football',
   oddspapi: 'oddspapi',
   'football-data': 'football-data',
+  openfootball: 'openfootball',
 } as const;
 
 /**

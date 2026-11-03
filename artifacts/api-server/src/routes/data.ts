@@ -143,7 +143,11 @@ async function loadValueBets(filters: {
   return rows.map(({ quote, prediction, match }) => ({
     ...outputOdds(quote),
     fixtureId: fixtureKey(match),
-    league: match.leagueCode as "premier-league" | "la-liga" | "bundesliga",
+    league: match.leagueCode as
+      | "premier-league"
+      | "la-liga"
+      | "bundesliga"
+      | "champions-league",
     homeTeam: match.homeTeam,
     awayTeam: match.awayTeam,
     kickoff: match.kickoff.toISOString(),

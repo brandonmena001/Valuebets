@@ -180,8 +180,13 @@ function safeProviderErrorDetail(body: unknown, secret: string): string {
     .slice(0, 180);
 }
 
-function leagueForName(name: string): LeagueCode | null {
+export function leagueForName(name: string): LeagueCode | null {
   const normalized = name.toLowerCase().normalize("NFD").replace(/\p{Diacritic}/gu, "");
+  if (
+    normalized.includes("champions league") &&
+    (normalized.includes("uefa") || normalized.startsWith("champions league")) &&
+    !/women|u\d|under|youth|reserve|qualif|afc|caf|concacaf|conmebol|libertadores/.test(normalized)
+  ) return "champions-league";
   if (
     normalized.includes("premier league") &&
     !/women|u\d|under|2nd|reserve|academy/.test(normalized)

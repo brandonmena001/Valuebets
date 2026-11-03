@@ -192,7 +192,7 @@ function MatchPage() {
       <span className="filter-label">Filtrar</span>
       <label className="search-field"><Search size={14} aria-hidden="true" /><input className="field" type="search" placeholder="Equipo o competición" value={search} onChange={event => setSearch(event.target.value)} aria-label="Buscar equipo o competición" data-testid="input-match-search" /></label>
       <select className="select" value={league} onChange={event => setLeague(event.target.value)} aria-label="Filtrar por liga" data-testid="select-match-league">
-        <option value="">Todas las ligas</option><option value="premier-league">Premier League</option><option value="la-liga">LaLiga</option><option value="bundesliga">Bundesliga</option>
+         <option value="">Todas las ligas</option><option value="premier-league">Premier League</option><option value="champions-league">Champions League</option><option value="la-liga">LaLiga</option><option value="bundesliga">Bundesliga</option>
       </select>
       <select className="select" value={status} onChange={event => setStatus(event.target.value)} aria-label="Filtrar por estado" data-testid="select-match-status">
         <option value="">Todos los estados</option><option value="scheduled">Programado</option><option value="live">En directo</option><option value="finished">Finalizado</option>
@@ -274,7 +274,7 @@ function SourcesPage() {
     </div>
     {message && <div className={`notice ${sync.isError ? 'error' : ''}`} role="status" data-testid="status-sync-result"><Check size={15} style={{ flexShrink: 0, marginTop: 2 }} /><span style={{ flex: 1 }}>{message}</span><button className="icon-button" onClick={() => setMessage('')} aria-label="Cerrar aviso"><X size={14} /></button></div>}
     {sync.isPending && <div className="notice" role="status"><RefreshCw size={14} />Solicitud en curso. Esperando respuesta del servidor…</div>}
-    {isLoading ? <div className="source-grid">{[0, 1, 2].map(i => <SkeletonBlock key={i} height={250} />)}</div> : reported.length ?
+     {isLoading ? <div className="source-grid">{[0, 1, 2, 3].map(i => <SkeletonBlock key={i} height={250} />)}</div> : reported.length ?
       <div className="source-grid">{cards.map(({ source, reported: isReported }) => <SourceCard key={source.provider} source={source} reported={isReported} />)}</div> :
       !isError && <div className="panel"><EmptyState title="Sin fuentes configuradas" copy="La API no ha informado de proveedores disponibles." /></div>}
     {data && <div className="panel schedule-strip">

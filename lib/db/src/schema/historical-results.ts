@@ -9,9 +9,8 @@ import {
 } from "drizzle-orm/pg-core";
 
 /**
- * Resultados y estadísticas de partidos terminados importados de football-data.co.uk
- * (gratuito, sin cuota). Es la fuente principal de historial del modelo porque el plan
- * gratuito de API-Football no da acceso a la temporada actual.
+ * Historial de resultados: football-data.co.uk para ligas nacionales y OpenFootball
+ * (CC0) para Champions League. Los campos estadísticos pueden quedar vacíos según la fuente.
  */
 export const historicalResultsTable = pgTable(
   "historical_results",

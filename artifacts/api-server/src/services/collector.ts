@@ -38,6 +38,7 @@ import {
 import { describeError, pgErrorInfo } from "../lib/error-detail";
 import { findUnmatchedTeams } from "../lib/team-coverage";
 import { fetchUpcomingFixtures, importFootballData } from "./football-data";
+import { importChampionsLeagueHistory } from "./champions-league-history";
 import {
   reconcilePastMatches,
   syncFootballDataFixtures,
@@ -68,6 +69,11 @@ const FIXTURE_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const ODDS_INTERVAL_MS = 8 * 60 * 60 * 1000;
 const MANUAL_COOLDOWN_MS = 5 * 60 * 1000;
 const ODDSPAPI_REFERENCE_CACHE_MS = 7 * 24 * 60 * 60 * 1000;
+const PUBLIC_FIXTURE_CALENDAR_LEAGUES = new Set<LeagueCode>([
+  "premier-league",
+  "la-liga",
+  "bundesliga",
+]);
 
 let activeRun: Promise<void> | null = null;
 let schedulerStarted = false;
@@ -135,6 +141,37 @@ export async function recordFootballDataStatus(history: { rows: number; errors: 
     .insert(sourceStatusTable)
     .values({ provider: "football-data", ...values })
     .onConflictDoUpdate({ target: sourceStatusTable.provider, set: values });
+}
+
+async function recordOpenFootballStatus(history: {
+  rows: number;
+  errors: string[];
+  skipped: boolean;
+}): Promise<void> {
+  if (history.skipped) return;
+  const state = history.rows
+    ? history.errors.length
+      ? "partial"
+      : "ok"
+    : "error";
+  const message =
+    history.rows > 0
+      ? `${history.rows} resultados de Champions League importados; solo incluye goles y resultado.${history.errors.length ? ` Avisos: ${history.errors.slice(0, 2).join(" | ")}` : ""}`
+      : `No se importaron resultados de Champions League${history.errors.length ? `: ${history.errors.slice(0, 2).join(" | ")}` : ""}.`;
+  const values = {
+    state,
+    lastAttemptAt: new Date(),
+    recordsCollected: history.rows,
+    message: message.slice(0, 300),
+    ...(history.rows > 0 ? { lastSuccessAt: new Date() } : {}),
+  };
+  await db
+    .insert(sourceStatusTable)
+    .values({ provider: "openfootball", ...values })
+    .onConflictDoUpdate({
+      target: sourceStatusTable.provider,
+      set: values,
+    });
 }
 
 async function ensureSourceRow(provider: ProviderName): Promise<void> {
@@ -765,6 +802,12 @@ async function loadOddsCalendar(now: Date): Promise<{ calendar: CalendarMatch[];
       );
     if (rows.length) known = true;
     calendar.push(...rows);
+    const missingUncoveredLeague = apiFootballLeagues.some(
+      ({ code }) =>
+        !PUBLIC_FIXTURE_CALENDAR_LEAGUES.has(code) &&
+        !calendar.some((match) => match.leagueCode === code),
+    );
+    if (missingUncoveredLeague) known = false;
   } catch (error) {
     return { calendar, known, error: describeError(error) };
   }
@@ -1149,6 +1192,21 @@ async function runSync(options: SyncOptions): Promise<void> {
     await recordFootballDataStatus(history).catch((error) =>
       logger.warn({ detail: describeError(error) }, "Could not record football-data status"),
     );
+    const championsLeagueHistory = await importChampionsLeagueHistory({
+      force: !options.scheduled,
+    });
+    if (championsLeagueHistory.errors.length) {
+      logger.warn(
+        { errors: championsLeagueHistory.errors },
+        "OpenFootball Champions League import had errors",
+      );
+    }
+    await recordOpenFootballStatus(championsLeagueHistory).catch((error) =>
+      logger.warn(
+        { detail: describeError(error) },
+        "Could not record OpenFootball status",
+      ),
+    );
     try {
       const reconciliation = await reconcilePastMatches();
       logger.info(reconciliation, "Past matches reconciled");
@@ -1291,9 +1349,9 @@ export async function getProviderStatusRows() {
   ]);
   const rows = await db.select().from(sourceStatusTable);
   return rows.map((row) => {
-    if (row.provider === "football-data") {
+    if (row.provider === "football-data" || row.provider === "openfootball") {
       return {
-        provider: "football-data" as const,
+        provider: row.provider as "football-data" | "openfootball",
         state: row.state,
         lastAttemptAt: row.lastAttemptAt?.toISOString() ?? null,
         lastSuccessAt: row.lastSuccessAt?.toISOString() ?? null,

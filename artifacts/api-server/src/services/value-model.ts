@@ -39,8 +39,8 @@ export async function loadFinishedHistory(now: Date): Promise<HistoryMatch[]> {
     .leftJoin(matchStatsTable, eq(matchesTable.id, matchStatsTable.matchId))
     .where(and(eq(matchesTable.status, "finished"), lt(matchesTable.kickoff, now)));
 
-  // football-data.co.uk es la fuente principal; los terminados de `matches` solo se usan
-  // en ligas sin historial importado (el plan gratuito de API-Football no cubre la temporada actual).
+  // Los resultados importados son la fuente principal; los terminados de `matches` solo
+  // se usan en competiciones sin historial descargable del proveedor correspondiente.
   const imported = await db.select().from(historicalResultsTable).where(lt(historicalResultsTable.kickoff, now));
   const covered = new Set(imported.map((row) => row.leagueCode));
   const fromImport: HistoryMatch[] = imported.map((row) => ({

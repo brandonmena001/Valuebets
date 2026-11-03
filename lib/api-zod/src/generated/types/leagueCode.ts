@@ -13,4 +13,5 @@ export const LeagueCode = {
   'premier-league': 'premier-league',
   'la-liga': 'la-liga',
   bundesliga: 'bundesliga',
+  'champions-league': 'champions-league',
 } as const;

@@ -4,7 +4,7 @@ import { ODDS_MIN_GAP_MS, paceGapMs, planOddsFetch, quotesDigest } from "./odds-
 
 const NOW = new Date("2026-10-10T12:00:00Z");
 const H = 3_600_000;
-const L = ["premier-league", "la-liga", "bundesliga"];
+const L = ["premier-league", "la-liga", "bundesliga", "champions-league"];
 const at = (hours: number, leagueCode: string) => ({ leagueCode, kickoff: new Date(NOW.getTime() + hours * H) });
 const base = { allLeagues: L, now: NOW, lastFetchAt: 0, lastDiscoveryAt: 0, scheduled: true, calendarKnown: true };
 
@@ -14,6 +14,11 @@ describe("planOddsFetch", () => {
     assert.equal(plan.fetch, true);
     assert.deepEqual(plan.leagues, ["premier-league", "la-liga", "bundesliga"]);
     assert.deepEqual([plan.near, plan.far], [1, 2]);
+  });
+  it("incluye Champions League cuando el calendario registra un partido suyo", () => {
+    const plan = planOddsFetch({ ...base, calendar: [at(18, "champions-league")] });
+    assert.equal(plan.fetch, true);
+    assert.deepEqual(plan.leagues, ["champions-league"]);
   });
   it("no gasta llamadas si no hay partidos y el calendario es conocido", () => {
     const plan = planOddsFetch({ ...base, calendar: [at(250, "la-liga")] });
@@ -29,6 +34,15 @@ describe("planOddsFetch", () => {
     const unknown = { ...base, calendar: [], calendarKnown: false };
     assert.deepEqual(planOddsFetch(unknown).leagues, L);
     assert.equal(planOddsFetch({ ...unknown, lastDiscoveryAt: NOW.getTime() - 2 * H }).fetch, false);
+  });
+  it("un calendario parcial descubre todas las competiciones aunque haya fixtures nacionales", () => {
+    const plan = planOddsFetch({
+      ...base,
+      calendarKnown: false,
+      calendar: [at(5, "premier-league")],
+    });
+    assert.equal(plan.reason, "calendario desconocido: consulta de descubrimiento");
+    assert.deepEqual(plan.leagues, L);
   });
   it("ignora ligas no elegidas y partidos ya iniciados hace más de 2 h", () => {
     const plan = planOddsFetch({ ...base, calendar: [at(5, "serie-a"), at(-5, "la-liga")] });

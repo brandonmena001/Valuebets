@@ -1,4 +1,8 @@
-export type LeagueCode = "premier-league" | "la-liga" | "bundesliga";
+export type LeagueCode =
+  | "premier-league"
+  | "la-liga"
+  | "bundesliga"
+  | "champions-league";
 
 export const apiFootballLeagues: Array<{
   code: LeagueCode;
@@ -9,6 +13,7 @@ export const apiFootballLeagues: Array<{
   { code: "premier-league", id: 39, name: "Premier League", country: "England" },
   { code: "la-liga", id: 140, name: "LaLiga", country: "Spain" },
   { code: "bundesliga", id: 78, name: "Bundesliga", country: "Germany" },
+  { code: "champions-league", id: 2, name: "UEFA Champions League", country: "Europe" },
 ];
 
 type ApiResponse<T> = {

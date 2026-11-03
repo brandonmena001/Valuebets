@@ -22,8 +22,8 @@ export type OddsPlan = {
  * - Partidos en las próximas 24 h: se consulta (el temporizador ya espacia 8 h).
  * - Solo partidos entre 24 h y 10 días: máximo una consulta cada 24 h (programada).
  * - Ninguno y calendario conocido: 0 llamadas.
- * - Calendario desconocido (sin fixtures.csv ni partidos en BD): una consulta de
- *   descubrimiento como máximo cada 24 h si es programada; la manual siempre pasa.
+ * - Calendario desconocido o incompleto: una consulta de descubrimiento de todas
+ *   las competiciones como máximo cada 24 h si es programada; la manual siempre pasa.
  * Una sincronización manual salta los límites de cadencia, no el filtro de ligas.
  */
 export function planOddsFetch(input: {
@@ -49,6 +49,12 @@ export function planOddsFetch(input: {
   }
   const leagues = input.allLeagues.filter((code) => near.has(code) || far.has(code));
   const base = { near: nearCount, far: farCount };
+  if (!input.calendarKnown) {
+    const due = !input.scheduled || t - input.lastDiscoveryAt >= ODDS_DISCOVERY_INTERVAL_MS;
+    return due
+      ? { fetch: true, leagues: input.allLeagues, reason: "calendario desconocido: consulta de descubrimiento", ...base }
+      : { fetch: false, leagues: [], reason: "calendario desconocido y el descubrimiento ya se hizo hace menos de 24 h", ...base };
+  }
   if (nearCount > 0) return { fetch: true, leagues, reason: "hay partidos en las próximas 24 h", ...base };
   if (farCount > 0) {
     const due = !input.scheduled || t - input.lastFetchAt >= ODDS_FAR_ONLY_INTERVAL_MS;
@@ -56,13 +62,7 @@ export function planOddsFetch(input: {
       ? { fetch: true, leagues, reason: "solo hay partidos entre 24 h y 10 días", ...base }
       : { fetch: false, leagues: [], reason: "solo hay partidos entre 24 h y 10 días y la última consulta fue hace menos de 24 h", ...base };
   }
-  if (input.calendarKnown) {
-    return { fetch: false, leagues: [], reason: "sin partidos de las ligas elegidas en los próximos 10 días", ...base };
-  }
-  const due = !input.scheduled || t - input.lastDiscoveryAt >= ODDS_DISCOVERY_INTERVAL_MS;
-  return due
-    ? { fetch: true, leagues: input.allLeagues, reason: "calendario desconocido: consulta de descubrimiento", ...base }
-    : { fetch: false, leagues: [], reason: "calendario desconocido y el descubrimiento ya se hizo hace menos de 24 h", ...base };
+  return { fetch: false, leagues: [], reason: "sin partidos de las ligas elegidas en los próximos 10 días", ...base };
 }
 
 /** Huella estable del contenido de cuotas de un evento (independiente del orden). */

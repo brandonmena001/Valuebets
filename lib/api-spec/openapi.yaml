@@ -212,13 +212,13 @@ components:
         - status
     LeagueCode:
       type: string
-      enum: [premier-league, la-liga, bundesliga]
+      enum: [premier-league, la-liga, bundesliga, champions-league]
     MarketCategory:
       type: string
       enum: [match-result, goals, corners, cards, shots-on-target]
     Provider:
       type: string
-      enum: [api-football, oddspapi, football-data]
+      enum: [api-football, oddspapi, football-data, openfootball]
     SyncProvider:
       type: string
       description: Providers that accept a manual sync request.

@@ -49,12 +49,12 @@ export const GetDashboardSummaryResponse = zod.object({
   "line": zod.number().nullable(),
   "bookmaker": zod.string(),
   "decimalOdds": zod.number().gt(getDashboardSummaryResponseTopValueBetsItemOneDecimalOddsExclusiveMin),
-  "source": zod.enum(['api-football', 'oddspapi', 'football-data']),
+  "source": zod.enum(['api-football', 'oddspapi', 'football-data', 'openfootball']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
 }).and(zod.object({
   "fixtureId": zod.string(),
-  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga']),
+  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga', 'champions-league']),
   "homeTeam": zod.string(),
   "awayTeam": zod.string(),
   "kickoff": zod.coerce.date(),
@@ -81,7 +81,7 @@ export const getValueBetsQueryMinEvMax = 100;
 
 
 export const GetValueBetsQueryParams = zod.object({
-  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga']).optional(),
+  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga', 'champions-league']).optional(),
   "marketCategory": zod.enum(['match-result', 'goals', 'corners', 'cards', 'shots-on-target']).optional(),
   "minEv": zod.coerce.number().min(getValueBetsQueryMinEvMin).max(getValueBetsQueryMinEvMax).default(getValueBetsQueryMinEvDefault)
 })
@@ -106,12 +106,12 @@ export const GetValueBetsResponseItem = zod.object({
   "line": zod.number().nullable(),
   "bookmaker": zod.string(),
   "decimalOdds": zod.number().gt(getValueBetsResponseOneDecimalOddsExclusiveMin),
-  "source": zod.enum(['api-football', 'oddspapi', 'football-data']),
+  "source": zod.enum(['api-football', 'oddspapi', 'football-data', 'openfootball']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
 }).and(zod.object({
   "fixtureId": zod.string(),
-  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga']),
+  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga', 'champions-league']),
   "homeTeam": zod.string(),
   "awayTeam": zod.string(),
   "kickoff": zod.coerce.date(),
@@ -137,14 +137,14 @@ export const getMatchesQueryDaysMax = 30;
 
 
 export const GetMatchesQueryParams = zod.object({
-  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga']).optional(),
+  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga', 'champions-league']).optional(),
   "status": zod.enum(['scheduled', 'live', 'finished']).optional(),
   "days": zod.coerce.number().int().min(1).max(getMatchesQueryDaysMax).default(getMatchesQueryDaysDefault)
 })
 
 export const GetMatchesResponseItem = zod.object({
   "fixtureId": zod.string(),
-  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga']),
+  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga', 'champions-league']),
   "country": zod.string(),
   "homeTeam": zod.string(),
   "awayTeam": zod.string(),
@@ -215,7 +215,7 @@ export const getMatchDetailResponseModelOneDataQualityScoreMax = 100;
 export const GetMatchDetailResponse = zod.object({
   "match": zod.object({
   "fixtureId": zod.string(),
-  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga']),
+  "league": zod.enum(['premier-league', 'la-liga', 'bundesliga', 'champions-league']),
   "country": zod.string(),
   "homeTeam": zod.string(),
   "awayTeam": zod.string(),
@@ -245,7 +245,7 @@ export const GetMatchDetailResponse = zod.object({
   "line": zod.number().nullable(),
   "bookmaker": zod.string(),
   "decimalOdds": zod.number().gt(getMatchDetailResponseOddsItemDecimalOddsExclusiveMin),
-  "source": zod.enum(['api-football', 'oddspapi', 'football-data']),
+  "source": zod.enum(['api-football', 'oddspapi', 'football-data', 'openfootball']),
   "sourceUpdatedAt": zod.coerce.date().nullable(),
   "capturedAt": zod.coerce.date()
 })),
@@ -374,7 +374,7 @@ export const getSourceStatusResponseSourcesItemRecordsCollectedMin = 0;
 
 export const GetSourceStatusResponse = zod.object({
   "sources": zod.array(zod.object({
-  "provider": zod.enum(['api-football', 'oddspapi', 'football-data']),
+  "provider": zod.enum(['api-football', 'oddspapi', 'football-data', 'openfootball']),
   "state": zod.enum(['unconfigured', 'waiting', 'ok', 'partial', 'stale', 'error']),
   "lastAttemptAt": zod.coerce.date().nullable(),
   "lastSuccessAt": zod.coerce.date().nullable(),
