@@ -1,3 +1,4 @@
+import { modelConfig } from "./config";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { devigPower, negBinPmf, overProbability, poissonPmf, sum } from "./math";
@@ -10,6 +11,9 @@ import {
 } from "./lines";
 import { parseCsv, parseFootballDataCsv, seasonCode, currentSeasonStartYear } from "../services/football-data-parse";
 import { expectedRates, fitRateModel, resultProbs, scoreMatrix, totalCountPmf, type Obs } from "./strength";
+
+// Estos tests cubren el motor de mezcla modelo+mercado (MODEL_MODE=blend); el modo referencia tiene los suyos.
+modelConfig.mode = "blend";
 
 function rng(seed: number) {
   let a = seed;

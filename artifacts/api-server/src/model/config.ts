@@ -6,12 +6,29 @@ function num(name: string, fallback: number): number {
 }
 
 export const MODEL_VERSION = "dc-nb-market-blend-v2";
+export const REFERENCE_VERSION = "ref-consensus-v1";
 
 /**
  * Todos los umbrales son ajustables por variable de entorno sin tocar código.
  * Los valores por defecto son deliberadamente conservadores.
  */
 export const modelConfig = {
+  /**
+   * «reference» (por defecto): el valor sale solo de comparar el precio de cada casa con el consenso de
+   * las demás (sin modelo). El backtest del 1X2 (5 ligas, ~3 600 partidos) mostró que mezclar el modelo
+   * EMPEORA la probabilidad del mercado (log-loss +0.0030, IC95 % [0.0015, 0.0043]), así que no interviene.
+   * «blend»: comportamiento anterior (modelo mezclado con el mercado). Solo para experimentar.
+   */
+  mode: (process.env.MODEL_MODE?.trim().toLowerCase() === "blend" ? "blend" : "reference") as "blend" | "reference",
+  /** Tope de EV frente al consenso en modo referencia; por encima se trata como cuota atípica (vieja o errónea). */
+  refMaxEvPct: num("MODEL_REF_MAX_EV_PCT", 15),
+  /**
+   * Casas cuyo precio NO se propone como «mejor precio» (se siguen usando para el consenso): los exchanges
+   * publican precios sin comisión, que en el backtest generaron casi todas las «ventajas» ficticias.
+   */
+  excludePriceBooks: (process.env.MODEL_EXCLUDE_PRICE_BOOKS ?? "betfair exchange,smarkets,matchbook,betdaq")
+    .split(",").map((name) => name.trim().toLowerCase()).filter(Boolean),
+
   // --- Ajuste de fuerza de equipos ---
   halfLifeDays: num("MODEL_HALF_LIFE_DAYS", 180),
   priorGames: num("MODEL_PRIOR_GAMES", 5),

@@ -1,4 +1,4 @@
-import { ESS_HALF_WEIGHT, MODEL_VERSION, maxModelWeight, modelConfig } from "./config";
+import { ESS_HALF_WEIGHT, MODEL_VERSION, REFERENCE_VERSION, maxModelWeight, modelConfig } from "./config";
 import { bttsProbability, effectiveProbability, lineOutcomeFromPmf, marginPmf } from "./lines";
 import { clamp, devigPower, median, negBinPmf, overProbability, sum } from "./math";
 import { classifyQuote, expectedKeys, type ClassifiedQuote, type SelectionKey, type StatKey } from "./markets";
@@ -269,7 +269,8 @@ function blendSnapshotWithMarket(args: {
   );
   if (!fresh.length) return null;
   const samples = consensusSamplesOf(latestEntries(fresh, match));
-  const weightOf = (key: keyof typeof maxModelWeight) => maxModelWeight[key] * (ess / (ess + ESS_HALF_WEIGHT));
+  const weightOf = (key: keyof typeof maxModelWeight) =>
+    modelConfig.mode === "reference" ? 0 : maxModelWeight[key] * (ess / (ess + ESS_HALF_WEIGHT));
 
   let result: BlendedSnapshot["result"] = null;
   const home = consensusOf(samples.get("result"), "result", "home", cfg.minBookmakers);
@@ -413,6 +414,8 @@ export function buildPredictions(input: {
     if (diag) diag.counters[key] = (diag.counters[key] ?? 0) + 1;
   };
   const cfg = modelConfig;
+  const referenceMode = cfg.mode === "reference";
+  const isExcludedPriceBook = (name: string) => cfg.excludePriceBooks.some((x) => name.toLowerCase().includes(x));
   const leagueModels = new Map<string, LeagueModel | null>();
 
   const leagueModel = (league: string, stat: StatKey): LeagueModel | null => {
@@ -597,6 +600,7 @@ export function buildPredictions(input: {
     // Mejor precio por selección entre todas las casas.
     const best = new Map<string, { entry: Entry; books: number }>();
     for (const entry of entries) {
+      if (referenceMode && isExcludedPriceBook(entry.quote.bookmaker)) continue; // su precio no es tomable (comisión)
       const key = `${entry.c.consensusKey}|${entry.c.selectionKey}`;
       const current = best.get(key);
       if (!current) best.set(key, { entry, books: 1 });
@@ -610,7 +614,9 @@ export function buildPredictions(input: {
     for (const { entry } of best.values()) {
       neededStats.add(entry.c.kind === "result" ? "goals" : entry.c.stat);
     }
-    const dist = distribution(match, neededStats);
+    const dist = referenceMode
+      ? ({ ess: {}, total: { goals: undefined, corners: undefined, cards: undefined, sot: undefined } } as ReturnType<typeof distribution>)
+      : distribution(match, neededStats);
 
     for (const { entry, books } of best.values()) {
       const { quote, c } = entry;
@@ -627,6 +633,47 @@ export function buildPredictions(input: {
       }
       const marketProb = consensus.prob;
       const booksUsed = consensus.books;
+
+      if (referenceMode) {
+        const odds = quote.decimalOdds;
+        // Líneas enteras o de cuarto implican push o medias ganancias: su riesgo depende de un modelo, que aquí no interviene.
+        const halfLine = c.line == null || Math.abs(Math.abs(c.line % 1) - 0.5) < 1e-9;
+        if ((c.kind === "handicap" || c.kind === "total") && !halfLine) { bump("referenceSkipLine"); continue; }
+        if (odds < cfg.minOdds || odds > cfg.maxOdds) { bump("rejectedOddsRange"); continue; }
+        if ((marketProb * odds - 1) * 100 < cfg.minEvPct - 2) { bump("rejectedEvTooLow"); continue; }
+        // Consenso SIN la casa que ofrece el precio: así su propio error no contamina la referencia.
+        const others = consensusSamplesOf(entries.filter((e) => e.quote.bookmaker !== quote.bookmaker));
+        const loo = consensusOf(others.get(c.consensusKey), c.kind, c.selectionKey, minBooks);
+        if (!loo) { bump("noConsensus"); continue; }
+        const evRef = (loo.prob * odds - 1) * 100;
+        if (evRef < cfg.minEvPct) { bump("rejectedEvTooLow"); continue; }
+        if (evRef > cfg.refMaxEvPct) { bump("rejectedPriceOutlier"); continue; }
+        bump("accepted");
+        outputs.push({
+          oddsQuoteId: quote.id,
+          matchId: match.id,
+          marketCategory: quote.marketCategory,
+          marketName: quote.marketName,
+          selection: quote.selection,
+          selectionKey: c.selectionKey,
+          line: c.line,
+          playerName: quote.playerName,
+          bookmaker: quote.bookmaker,
+          decimalOdds: odds,
+          rawModelProbability: loo.prob,
+          marketProbability: loo.prob,
+          modelProbability: loo.prob, // en modo referencia = consenso de las demás casas
+          fairOdds: 1 / loo.prob,
+          expectedValuePct: evRef,
+          // Sin ventaja demostrada (CLV ≈ 0 en el backtest): no se sugiere stake.
+          kellyFraction: 0,
+          bookmakersCount: Math.max(books, loo.books + 1),
+          sampleSize: 0,
+          confidence: loo.books + 1 >= 8 ? "medium" : "low",
+          modelVersion: REFERENCE_VERSION,
+        });
+        continue;
+      }
 
       // Probabilidad del modelo
       let raw: number | null = null;

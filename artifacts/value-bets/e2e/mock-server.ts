@@ -40,7 +40,7 @@ const quote = (id: string, category: string, marketName: string, selection: stri
 const valueBet = (id: string, fixtureId: string, home: string, away: string, league: string, extra: Record<string, unknown>) => ({
   ...quote(id, 'goals', 'Goles totales', 'Más de 2.5', 2.1, 'Bet365', 2.5),
   fixtureId, league, homeTeam: home, awayTeam: away, kickoff: iso(60 * 20),
-  modelProbability: 0.52, fairOdds: 1.92, expectedValuePct: 9.2, modelVersion: 'dc-nb-market-blend-v2',
+  modelProbability: 0.52, fairOdds: 1.92, expectedValuePct: 9.2, modelVersion: 'ref-consensus-v1',
   sampleSize: 18, confidence: 'medium', marketProbability: 0.47, kellyFraction: 0.012, bookmakersCount: 6,
   ...extra,
 });
@@ -61,7 +61,7 @@ const matches = [
 
 const lines = (values: Array<[number, number]>) => values.map(([line, over]) => ({ line, over }));
 const model = {
-  modelVersion: 'dc-nb-market-blend-v2',
+  modelVersion: 'ref-consensus-v1',
   expectedGoals: { home: 1.74, away: 1.12 },
   result: { home: 0.49, draw: 0.24, away: 0.27 },
   btts: 0.56,

@@ -1,6 +1,10 @@
+import { modelConfig } from "./config";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildPredictions, newDiagnostics, type HistoryMatch, type QuoteInput, type UpcomingMatch } from "./predict";
+
+// Estos tests cubren el motor de mezcla modelo+mercado (MODEL_MODE=blend); el modo referencia tiene los suyos.
+modelConfig.mode = "blend";
 
 const NOW = new Date("2026-10-10T12:00:00Z");
 const DAY = 86_400_000;

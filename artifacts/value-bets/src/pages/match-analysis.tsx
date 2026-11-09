@@ -41,7 +41,9 @@ function ModelSections({ model, fixtureId, match, home, away }: { model: MatchMo
     <section className="fd-card">
       <h2 className="fd-h">Resultado (1X2)</h2>
       <div className="fd-bet-sub" style={{ marginBottom: 8 }}>{blendedResult
-        ? `Mezcla de modelo y mercado · el modelo pesa ${Math.round(blendedResult.modelWeight * 100)} % · ${blendedResult.bookmakers} casas. Modelo puro: ${formatPct(model.result.home, 0)} / ${formatPct(model.result.draw, 0)} / ${formatPct(model.result.away, 0)}`
+        ? (blendedResult.modelWeight === 0
+          ? `Consenso del mercado sin margen · ${blendedResult.bookmakers} casas. El modelo no entra en la probabilidad (en el backtest no superó al mercado); solo informativo: ${formatPct(model.result.home, 0)} / ${formatPct(model.result.draw, 0)} / ${formatPct(model.result.away, 0)}`
+          : `Mezcla de modelo y mercado · el modelo pesa ${Math.round(blendedResult.modelWeight * 100)} % · ${blendedResult.bookmakers} casas. Modelo puro: ${formatPct(model.result.home, 0)} / ${formatPct(model.result.draw, 0)} / ${formatPct(model.result.away, 0)}`)
         : 'Modelo puro (sin consenso de mercado suficiente)'}</div>
       <div className="fd-triple">
         {picks.map((pick, index) => <div className={`fd-prob ${index === 0 ? 'home' : index === 2 ? 'away' : ''}`} key={pick.selection}>
@@ -121,7 +123,7 @@ export default function MatchAnalysisPage() {
       </section>
 
       {match.status === 'scheduled' && !model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>Aún no hay datos suficientes de ambos equipos para calcular el modelo. Se activará cuando haya más partidos con estadísticas.</span></div>}
-      {model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>{model.blended ? 'El 1X2, «ambos anotan» y los goles mostrados ya se mezclan con el consenso del mercado; córners, tarjetas y tiros son del modelo puro. ' : 'Probabilidades del modelo estadístico, sin consenso de mercado disponible. '}Son una estimación, no una certeza: el mercado suele ser más preciso, así que compara siempre con las value bets de abajo.</span></div>}
+      {model && <div className="notice" role="status"><Info size={15} aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }} /><span>{model.blended ? (model.blended.result?.modelWeight === 0 ? 'El 1X2, «ambos anotan» y los goles mostrados son el consenso del mercado (sin margen); el modelo estadístico solo se muestra como referencia porque en el backtest no superó al mercado. Córners, tarjetas y tiros son del modelo puro, sin validar. ' : 'El 1X2, «ambos anotan» y los goles mostrados ya se mezclan con el consenso del mercado; córners, tarjetas y tiros son del modelo puro. ') : 'Probabilidades del modelo estadístico, sin consenso de mercado disponible. '}Son una estimación, no una certeza: el mercado suele ser más preciso, así que compara siempre con las value bets de abajo.</span></div>}
 
       {model && <ModelSections model={model} fixtureId={fixtureId} match={label} home={match.homeTeam} away={match.awayTeam} />}
 
